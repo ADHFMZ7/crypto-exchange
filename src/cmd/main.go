@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ADHFMZ7/crypto-exchange/config"
-	"github.com/ADHFMZ7/crypto-exchange/internal/api"
+	"github.com/ADHFMZ7/crypto-exchange/api"
 )
 
 func main() {
@@ -28,12 +28,6 @@ func main() {
 	mux.HandleFunc("/", api.HelloHandler)
 
 	mux.HandleFunc("POST /users", api.UserPostHandler)
-
-	// mux.HandleFunc("/user/{id}", UserHandler)
-	// mux.HandleFunc("/wallets", WalletHandler)
-	// mux.HandleFunc("/deposit", DepositHandler)
-	// mux.HandleFunc("/orders", OrderHandler)
-	// mux.HandleFunc("/orderbook", OrderbookHandler)
 
 	err = http.ListenAndServe(config.Server.GetURL(), mux)
 	if err != nil {

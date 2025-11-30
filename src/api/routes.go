@@ -38,8 +38,16 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func OrderHandler(w http.ResponseWriter, r *http.Request) {
+	// Post request
+	// {
+	//   "side": (buy or sell)
+	//   "price":
+	//   "size":
+	// }
 
-	fmt.Fprintf(w, "Hello from Go API!")
+
+
+
 }
 
 func OrderbookHandler(w http.ResponseWriter, r *http.Request) {
