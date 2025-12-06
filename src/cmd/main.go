@@ -1,31 +1,32 @@
 package main
 
 import (
-	"net/http"
-	"context"
 	"log"
+	"net/http"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/ADHFMZ7/crypto-exchange/config"
 	"github.com/ADHFMZ7/crypto-exchange/api"
+	"github.com/ADHFMZ7/crypto-exchange/config"
+	"github.com/ADHFMZ7/crypto-exchange/internal/db"
+	"github.com/ADHFMZ7/crypto-exchange/internal/store"
 )
 
 func main() {
 
 	config := config.New()
 
-	dbpool, err := pgxpool.New(context.Background(), config.DB.URL)
+	dbpool, err := db.NewPool(config.DB.URL)
 	if err != nil {
 		log.Fatalf("Unable to create connection pool: %v\n", err)
 	}
 	defer dbpool.Close()
 
+	stores := store.NewStores(dbpool)
+
+	services := api.NewServices(stores)
+
 	mux := http.NewServeMux()
 
 	log.Print("starting server on ", config.Server.GetURL())
-
-	mux.HandleFunc("/", api.HelloHandler)
 
 	mux.HandleFunc("POST /users", api.UserPostHandler)
 
@@ -34,5 +35,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
-

@@ -2,16 +2,13 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
 	"fmt"
+	"net/http"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 )
 
-func HelloHandler(w http.ResponseWriter, r *http.Request) {
-
-	fmt.Fprintf(w, "Hello from Go API!")
-}
+// User handlers
 
 func UserPostHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -25,6 +22,11 @@ func UserPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	// fmt.Println(w, r.Header)
 	fmt.Fprintln(w, user)
+}
+
+func UserGetHandler(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Fprintf(w, "Hello from Go API!")
 }
 
 func WalletHandler(w http.ResponseWriter, r *http.Request) {
@@ -44,9 +46,6 @@ func OrderHandler(w http.ResponseWriter, r *http.Request) {
 	//   "price":
 	//   "size":
 	// }
-
-
-
 
 }
 
