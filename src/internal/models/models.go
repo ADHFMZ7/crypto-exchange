@@ -11,10 +11,16 @@ package models
 // )
 
 type User struct {
-	Fname    string `json:"first_name"`
-	Lname    string `json:"last_name"`
+	ID       int64  `json:"id"`
+	Fullname string `json:"fullname"`
 	Email    string `json:"email"`
-	Password string `json:"password"`
+}
+
+type UserAuth struct {
+	ID       int64  
+	Fullname string
+	Email    string
+	Password string
 }
 
 type Order struct {

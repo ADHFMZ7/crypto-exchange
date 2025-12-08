@@ -1,4 +1,4 @@
-package store
+package stores
 
 import (
 	"github.com/jackc/pgx/v5/pgxpool"

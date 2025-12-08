@@ -1,8 +1,7 @@
 
 create table users (
   id serial primary key 
-  fname text not null,
-  lname text not null,
+  fullname text not null,
 
   email text unique not null,
   hashed_password text not null,

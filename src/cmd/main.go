@@ -4,10 +4,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/ADHFMZ7/crypto-exchange/api"
+	"github.com/ADHFMZ7/crypto-exchange/internal/api"
 	"github.com/ADHFMZ7/crypto-exchange/config"
 	"github.com/ADHFMZ7/crypto-exchange/internal/db"
-	"github.com/ADHFMZ7/crypto-exchange/internal/store"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
 func main() {
@@ -20,18 +21,10 @@ func main() {
 	}
 	defer dbpool.Close()
 
-	stores := store.NewStores(dbpool)
-
-	services := api.NewServices(stores)
-
-	mux := http.NewServeMux()
+	stores := stores.NewStores(dbpool)
+	services := services.NewServices(stores)
+	mux := api.NewRouter(services)
 
 	log.Print("starting server on ", config.Server.GetURL())
-
-	mux.HandleFunc("POST /users", api.UserPostHandler)
-
-	err = http.ListenAndServe(config.Server.GetURL(), mux)
-	if err != nil {
-		log.Fatal(err)
-	}
+	log.Fatal(http.ListenAndServe(config.Server.GetURL(), mux))
 }
