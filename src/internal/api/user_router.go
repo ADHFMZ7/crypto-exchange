@@ -20,23 +20,23 @@ func NewUserRouter(service *services.Services) *UserRouter {
 
 func (router *UserRouter) Register(mux *http.ServeMux) {
 
-	mux.HandleFunc("POST /users/", UserPostHandler)
+	mux.HandleFunc("POST /users/", router.UserPostHandler)
 
 }
 
 
 // Handlers below here
 
-func UserPostHandler(w http.ResponseWriter, r *http.Request) {
+func (router *UserRouter) UserPostHandler(w http.ResponseWriter, r *http.Request) {
 
-	var user models.User
+	var userform models.UserAuth
 
-	err := json.NewDecoder(r.Body).Decode(&user)
+	err := json.NewDecoder(r.Body).Decode(&userform)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 
 	// fmt.Println(w, r.Header)
-	fmt.Fprintln(w, user)
+	fmt.Fprintln(w, userform)
 }
