@@ -11,12 +11,12 @@ type UserStore struct {
 	db *pgxpool.Pool
 }
 
-func (store *UserStore) CreateUser(ctx context.Context, fullname, email, hashed_password string) (*models.User, error){
+func (store *UserStore) CreateUser(ctx context.Context, fullname, email, hashed_password string) (*models.User, error) {
 
 	var user models.User
 
 	err := store.db.QueryRow(ctx,
-		`INSERT INTO users (fullname, email, hashed_password) VALUES ($1, $2, $3, $4) RETURNING id, fullname, email`,
+		`INSERT INTO users (fullname, email, hashed_password) VALUES ($1, $2, $3) RETURNING id, fullname, email`,
 		fullname,
 		email,
 		hashed_password,
@@ -24,7 +24,7 @@ func (store *UserStore) CreateUser(ctx context.Context, fullname, email, hashed_
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &user, err
 
 }
@@ -34,7 +34,7 @@ func (store *UserStore) CreateUser(ctx context.Context, fullname, email, hashed_
 // 	var user models.User
 //
 // 	err := store.db.QueryRow(ctx,
-// 	"SELECT (id, fullname, email) FROM users WHERE id == (?)", 
+// 	"SELECT (id, fullname, email) FROM users WHERE id == (?)",
 // 	id).Scan()
 //
 // )

@@ -1,16 +1,16 @@
 
 create table users (
-  id serial primary key 
+  id serial primary key,
   fullname text not null,
 
   email text unique not null,
   hashed_password text not null,
   created_at timestamptz default now()
-)
+);
 
 -- Orders placed by users for a currency pair
 create table orders (
-  id bigserial primary key
+  id bigserial primary key,
   user_id integer references users(id),
   quantity numeric,
   price_each numeric, 
@@ -19,17 +19,17 @@ create table orders (
   status text, -- open, filled, cancelled
 
   created_at timestamptz default now()
-)
+);
 
 -- Trades executed between users
 create table trades (
-  id bigserial primary key
+  id bigserial primary key,
   buy_order_id bigint references orders(id),
   sell_order_id bigint references orders(id),
   quantity numeric,
   price_each numeric,
   executed_at timestamptz default now()
-)
+);
 
 -- User balances for different currencies
 create table balance (
@@ -39,7 +39,7 @@ create table balance (
   balance numeric,
 
   updated_at timestamptz default now()
-)
+);
 
 -- Indexes for performance
 create index idx_orders_user_id on orders(user_id);

@@ -18,7 +18,7 @@ func NewUserService(userStore *stores.UserStore) *UserService {
 }
 
 func (s *UserService) RegisterUser(ctx context.Context, email, fullname, password string) (*models.User, error) {
-	
+
 	// TODO: Data validation layer perhaps
 	// For now assuming data is valid
 	// validate email
