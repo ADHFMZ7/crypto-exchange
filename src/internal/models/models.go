@@ -31,3 +31,5 @@ type Order struct {
 	Market    string  `json:"market"` // e.g. BTC-USD
 	Status    string  `json:"status"` // open, filled, cancelled
 }
+
+
