@@ -42,3 +42,11 @@ func (s *UserService) RegisterUser(ctx context.Context, email, fullname, passwor
 	fmt.Println(user)
 	return user, nil
 }
+
+func (s *UserService) GetUserByID(ctx context.Context, id int64) (*models.User, error) {
+	return s.store.GetByID(ctx, id)
+}
+
+func (s *UserService) GiveStartingBalance(ctx context.Context, userID int64) error {
+	return s.store.GiveBalance(ctx, userID, "USD", 1000000) // 10,000.00 USD in cents
+}

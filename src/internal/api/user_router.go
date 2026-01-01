@@ -36,7 +36,8 @@ func (router *UserRouter) UserPostHandler(w http.ResponseWriter, r *http.Request
 	// Responses:
 	// 201 Created - user successfully registered
 	// 400 Bad Request - invalid request data
-	// 500 Internal Server Error - server error
+
+	// TODO: Give user 10,000 starting balance in USD
 
 	var userForm models.UserAuth
 
@@ -51,6 +52,12 @@ func (router *UserRouter) UserPostHandler(w http.ResponseWriter, r *http.Request
 		ctx, userForm.Email, userForm.Fullname, userForm.Password)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = router.Services.Users.GiveStartingBalance(ctx, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

@@ -17,19 +17,17 @@ type User struct {
 }
 
 type UserAuth struct {
-	ID       int64  
+	ID       int64
 	Fullname string
 	Email    string
 	Password string
 }
 
 type Order struct {
-	UserID    int     `json:"user_id"`
+	UserID    int64   `json:"user_id"`
 	Quantity  float64 `json:"quantity"`
 	PriceEach float64 `json:"price_each"`
 	Side      string  `json:"side"`   // buy or sell
 	Market    string  `json:"market"` // e.g. BTC-USD
 	Status    string  `json:"status"` // open, filled, cancelled
 }
-
-

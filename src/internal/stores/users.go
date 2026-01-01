@@ -26,17 +26,30 @@ func (store *UserStore) CreateUser(ctx context.Context, fullname, email, hashed_
 	}
 
 	return &user, err
-
 }
 
-// func (store *UserStore) GetByID(ctx context.Context, id int) (*models.User, err) {
-//
-// 	var user models.User
-//
-// 	err := store.db.QueryRow(ctx,
-// 	"SELECT (id, fullname, email) FROM users WHERE id == (?)",
-// 	id).Scan()
-//
-// )
-//
-// }
+func (store *UserStore) GetByID(ctx context.Context, id int64) (*models.User, error) {
+
+	var user models.User
+
+	err := store.db.QueryRow(ctx,
+		"SELECT (id, fullname, email) FROM users WHERE id == (?)",
+		id).Scan(&user.ID, &user.Fullname, &user.Email)
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (store *UserStore) GiveBalance(ctx context.Context, userID int64, currency string, amount int64) error {
+	// Give new user a starting balance
+
+	_, err := store.db.Exec(ctx,
+		`INSERT INTO balances (user_id, currency, balance) VALUES ($1, $2, $3)`,
+		userID,
+		currency,
+		amount, // in cents
+	)
+	return err
+}
