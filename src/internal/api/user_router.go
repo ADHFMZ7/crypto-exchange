@@ -11,7 +11,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
-// TODO: Take in user service or all services
+// TODO: Take in user service or all services? Make decision later
 type UserRouter struct {
 	Services *services.Services
 }
@@ -22,11 +22,21 @@ func NewUserRouter(service *services.Services) *UserRouter {
 
 func (router *UserRouter) Register(mux *http.ServeMux) {
 
-	mux.HandleFunc("POST /users", router.UserRegister)
-	mux.HandleFunc("GET /users/{id}", router.UserGetHandler)
+	mux.Handle(
+		"OPTIONS /users/",
+		withCORS(http.HandlerFunc(emptyHandler)),
+	)
+	mux.Handle(
+		"POST /users",
+		withCORS(http.HandlerFunc(router.UserRegister)),
+	)
+	mux.Handle(
+		"GET /users/{id}",
+		withCORS(http.HandlerFunc(router.UserGetHandler)),
+	)
 	mux.Handle(
 		"GET /users/me",
-		auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf)),
+		withCORS(auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf))),
 	)
 }
 

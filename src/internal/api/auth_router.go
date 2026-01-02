@@ -11,7 +11,6 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
-// TODO: Take in user service or all services
 type AuthRouter struct {
 	Services *services.Services
 }
@@ -22,8 +21,18 @@ func NewAuthRouter(service *services.Services) *AuthRouter {
 
 func (router *AuthRouter) Register(mux *http.ServeMux) {
 
-	mux.HandleFunc("POST /auth/login", router.LoginHandler)
-	mux.HandleFunc("POST /auth/logout", router.LogoutHandler)
+	mux.Handle(
+		"OPTIONS /auth/",
+		withCORS(http.HandlerFunc(emptyHandler)),
+	)
+	mux.Handle(
+		"POST /auth/login",
+		withCORS(http.HandlerFunc(router.LoginHandler)),
+	)
+	mux.Handle(
+		"POST /auth/logout",
+		withCORS(http.HandlerFunc(router.LogoutHandler)),
+	)
 }
 
 // Handlers below here
