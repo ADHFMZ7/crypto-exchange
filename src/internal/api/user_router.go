@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
@@ -66,9 +67,25 @@ func (router *UserRouter) UserPostHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (router *UserRouter) UserGetHandler(w http.ResponseWriter, r *http.Request) {
+	// GET /users/{id} - get user info by ID
+	// Responses:
+	// 200 OK - user info returned
+	// 400 Bad Request - invalid user ID format
+	// 404 Not Found - user with given ID does not exist
 
-	// id := 1 // TODO: get from URL params
-	// router.Services.Users.GetUserByID(r.Context(), id)
+	id := r.PathValue("id")
+	idNum, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	// fmt.Fprintln(w, "User GET handler")
+	user, err := router.Services.Users.GetUserByID(r.Context(), idNum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }

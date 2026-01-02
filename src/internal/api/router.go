@@ -6,14 +6,12 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
-
-
 func NewRouter(services *services.Services) *http.ServeMux {
-	
+
 	mux := http.NewServeMux()
 
-	NewUserRouter(services).Register(mux)	
+	NewUserRouter(services).Register(mux)
+	NewAuthRouter(services).Register(mux)
 
 	return mux
 }
-	

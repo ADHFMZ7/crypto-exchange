@@ -47,6 +47,10 @@ func (s *UserService) GetUserByID(ctx context.Context, id int64) (*models.User, 
 	return s.store.GetByID(ctx, id)
 }
 
+func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*models.UserAuth, error) {
+	return s.store.GetByEmail(ctx, email)
+}
+
 func (s *UserService) GiveStartingBalance(ctx context.Context, userID int64) error {
 	return s.store.GiveBalance(ctx, userID, "USD", 1000000) // 10,000.00 USD in cents
 }
