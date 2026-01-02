@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
@@ -21,12 +22,16 @@ func NewUserRouter(service *services.Services) *UserRouter {
 
 func (router *UserRouter) Register(mux *http.ServeMux) {
 
-	mux.HandleFunc("POST /users/", router.UserPostHandler)
-	mux.HandleFunc("GET /users/", router.UserGetHandler)
+	mux.HandleFunc("POST /users", router.UserRegister)
+	mux.HandleFunc("GET /users/{id}", router.UserGetHandler)
+	mux.Handle(
+		"GET /users/me",
+		auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf)),
+	)
 }
 
 // Handlers below here
-func (router *UserRouter) UserPostHandler(w http.ResponseWriter, r *http.Request) {
+func (router *UserRouter) UserRegister(w http.ResponseWriter, r *http.Request) {
 	// POST /users/ - register new user
 	// Request body JSON format:
 	// {
@@ -81,6 +86,26 @@ func (router *UserRouter) UserGetHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	user, err := router.Services.Users.GetUserByID(r.Context(), idNum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func (router *UserRouter) UserGetSelf(w http.ResponseWriter, r *http.Request) {
+	// GET /users/me - get info about the authenticated user
+	// Responses:
+	// 200 OK - user info returned
+	// 401 Unauthorized - user not authenticated
+
+	fmt.Println("Getting self user info")
+
+	userID := int64(r.Context().Value(auth.CtxUserKey).(int))
+
+	user, err := router.Services.Users.GetUserByID(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

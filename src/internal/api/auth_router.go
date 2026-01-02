@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
@@ -62,14 +63,21 @@ func (router *AuthRouter) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Create session or JWT token for user
+	token, err := auth.GenerateJWT(strconv.Itoa(int(storedUser.ID)), 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "User logged in with ID: %d", storedUser.ID)
+	// Return token to user
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
 func (router *AuthRouter) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	// POST /auth/logout - user logout
 	// Responses:
 	// 200 OK - user successfully logged out
+
+	// Note: Since we're using stateless JWTs, logout can be handled on the client side, this will do nothing
 }
