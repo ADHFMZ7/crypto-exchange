@@ -23,6 +23,18 @@ type UserAuth struct {
 	Password string
 }
 
+type Balance struct {
+	ID       int64   `json:"id"`
+	UserID   int64   `json:"user_id"`
+	Currency string  `json:"currency"` // e.g. USD, BTC
+	Amount   float64 `json:"amount"`
+}
+
+type Wallet struct {
+	UserID   int64     `json:"user_id"`
+	Balances []Balance `json:"balances"`
+}
+
 type Order struct {
 	UserID    int64   `json:"user_id"`
 	Quantity  float64 `json:"quantity"`

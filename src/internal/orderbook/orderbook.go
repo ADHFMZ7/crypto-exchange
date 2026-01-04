@@ -1,45 +1,37 @@
 package orderbook
 
-
-
+// A matching engine order book implementation
 
 type Order struct {
-  idNumber int
-  buyOrSell int
-  shares int
-  limit int
-  entryTime int
-  eventTime int
-  nextOrder *int
-  prevOrder *int
-  parentLimit *int
+	idNumber    int
+	buyOrSell   int
+	shares      int
+	limit       int
+	entryTime   int
+	eventTime   int
+	nextOrder   *int
+	prevOrder   *int
+	parentLimit *int
 }
 
 type Limit struct {
-  limitPrice int
-  size int
-  totalVolume int
-  parent *int
-  leftChild *int
-  rightChild *int
-  headOrder *int
-  tailOrder *int
+	limitPrice  int
+	size        int
+	totalVolume int
+	parent      *int
+	leftChild   *int
+	rightChild  *int
+	headOrder   *int
+	tailOrder   *int
 }
 
 type Book struct {
-  buyTree *int
-  sellTree *int
-  lowestSell *int
-  highestBuy *int
+	buyTree    *int
+	sellTree   *int
+	lowestSell *int
+	highestBuy *int
 }
 
+func (*Book) add(buy bool, shares, limit, entryTime, eventTime int) {
 
-
-
-
-
-
-func (* Book) add(buy bool, shares, limit, entryTime, eventTime int) {
-	
 }
-
