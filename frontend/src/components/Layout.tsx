@@ -10,8 +10,7 @@ type LayoutProps = {
 const links = [
   { to: "/", label: "Home", end: true },
   { to: "/wallet", label: "Wallet" },
-  { to: "/trades/new", label: "New Trade" },
-  { to: "/trades", label: "Trades & Markets", end: true }
+  { to: "/trades/new", label: "New Trade" }
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -45,9 +44,6 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
 
         <div className="inline-actions">
-          <button type="button" onClick={toggle} className="ghost-button">
-            {theme === "dark" ? "Day mode" : "Night mode"}
-          </button>
           {user ? (
             <>
               <div className="pill">
@@ -57,9 +53,27 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button type="button" onClick={logout}>
                 Logout
               </button>
+              <button
+                type="button"
+                onClick={toggle}
+                className="icon-button"
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {theme === "dark" ? "☀️" : "🌙"}
+              </button>
             </>
           ) : (
-            <div className="muted">Guest</div>
+            <>
+              <div className="muted">Guest</div>
+              <button
+                type="button"
+                onClick={toggle}
+                className="icon-button"
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {theme === "dark" ? "☀️" : "🌙"}
+              </button>
+            </>
           )}
         </div>
       </header>

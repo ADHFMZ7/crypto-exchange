@@ -16,7 +16,7 @@ func (store *WalletStore) GetByUserID(ctx context.Context, userID int64) (*model
 	wallet.UserID = userID
 
 	rows, err := store.pool.Query(ctx,
-		`SELECT id, user_id, currency, amount FROM balances WHERE user_id = $1`,
+		`SELECT id, user_id, currency, balance FROM balance WHERE user_id = $1`,
 		userID,
 	)
 	if err != nil {

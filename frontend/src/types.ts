@@ -9,6 +9,11 @@ export type WalletBalance = {
   amount: number;
 };
 
+export type Wallet = {
+  user_id: number;
+  balances: WalletBalance[];
+};
+
 export type Trade = {
   id: string;
   market: string;

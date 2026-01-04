@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -78,7 +77,6 @@ func (router *UserRouter) UserRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "User created with ID: %d", user.ID)
 }
 
 func (router *UserRouter) UserGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -110,8 +108,6 @@ func (router *UserRouter) UserGetSelf(w http.ResponseWriter, r *http.Request) {
 	// Responses:
 	// 200 OK - user info returned
 	// 401 Unauthorized - user not authenticated
-
-	fmt.Println("Getting self user info")
 
 	userID := int64(r.Context().Value(auth.CtxUserKey).(int))
 

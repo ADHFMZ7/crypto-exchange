@@ -1,13 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import type { MarketTicker, Trade, WalletBalance } from "../types";
-
-const mockBalances: WalletBalance[] = [
-  { currency: "USD", amount: 10000 },
-  { currency: "BTC", amount: 0.42 },
-  { currency: "ETH", amount: 3.5 }
-];
+import type { MarketTicker, Trade } from "../types";
 
 const sampleTrades: Trade[] = [
   { id: "1", market: "BTC-USD", side: "buy", quantity: 0.1, price: 45000, status: "open", placedAt: "2024-01-01T12:00:00Z" },
@@ -185,31 +179,8 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
         <p className="muted">
-          Market snapshot, active trades, and wallet balances. Trades and market feeds are mocked until backend endpoints exist.
+          Market snapshot and active trades. Data is mocked until backend endpoints exist.
         </p>
-      </div>
-
-      <div className="panel">
-        <div className="headline">
-          <h3 style={{ margin: 0 }}>Wallet</h3>
-          <div className="tag">Prototype</div>
-        </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Currency</th>
-              <th>Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mockBalances.map((balance) => (
-              <tr key={balance.currency}>
-                <td>{balance.currency}</td>
-                <td>{balance.amount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
 
       <div className="panel">
@@ -251,11 +222,6 @@ export const HomePage: React.FC = () => {
       <div className="panel">
         <div className="headline">
           <h3 style={{ margin: 0 }}>Markets (live mock)</h3>
-          <Link to="/trades">
-            <button type="button" className="ghost-button">
-              View all
-            </button>
-          </Link>
         </div>
         <table className="table">
           <thead>

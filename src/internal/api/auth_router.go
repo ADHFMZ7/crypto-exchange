@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -58,13 +57,11 @@ func (router *AuthRouter) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// validate email and password
-	fmt.Println("Getting user by email:", user.Email)
 	storedUser, err := router.Services.Users.GetUserByEmail(ctx, user.Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	fmt.Println("Retrieved user:", storedUser)
 	// Check password
 	valid := auth.CheckPasswordHash(user.Password, storedUser.Password)
 	if !valid {

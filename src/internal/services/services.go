@@ -3,12 +3,14 @@ package services
 import "github.com/ADHFMZ7/crypto-exchange/internal/stores"
 
 type Services struct {
-	Users *UserService
+	Users   *UserService
+	Wallets *WalletService
 }
 
 func NewServices(stores *stores.Stores) *Services {
 
 	return &Services{
-		Users: NewUserService(stores.Users),
+		Users:   NewUserService(stores.Users),
+		Wallets: NewWalletService(stores.Wallets, stores.Users),
 	}
 }

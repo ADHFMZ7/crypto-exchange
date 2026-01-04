@@ -5,11 +5,13 @@ import (
 )
 
 type Stores struct {
-	Users *UserStore
+	Users   *UserStore
+	Wallets *WalletStore
 }
 
 func NewStores(pool *pgxpool.Pool) *Stores {
 	return &Stores{
-		Users: &UserStore{pool},
+		Users:   &UserStore{pool},
+		Wallets: &WalletStore{pool},
 	}
 }

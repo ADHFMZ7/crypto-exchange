@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
@@ -39,7 +38,6 @@ func (s *UserService) RegisterUser(ctx context.Context, email, fullname, passwor
 		return nil, err
 	}
 
-	fmt.Println(user)
 	return user, nil
 }
 

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
@@ -8,26 +9,26 @@ import (
 )
 
 type WalletService struct {
-	WalletRepo *stores.WalletStore
-	UserRepo   *stores.UserStore
+	WalletStore *stores.WalletStore
+	UserStore   *stores.UserStore
 }
 
-func NewWalletService(walletRepo *stores.WalletStore, userRepo *stores.UserStore) *WalletService {
+func NewWalletService(walletStore *stores.WalletStore, userStore *stores.UserStore) *WalletService {
 	return &WalletService{
-		WalletRepo: walletRepo,
-		UserRepo:   userRepo,
+		WalletStore: walletStore,
+		UserStore:   userStore,
 	}
 }
 
-func (service *WalletService) GetWalletByUserID(userID int64) (*models.Wallet, error) {
+func (service *WalletService) GetWalletByUserID(ctx context.Context, userID int64) (*models.Wallet, error) {
 	// Check if user exists
-	_, err := service.UserRepo.GetByID(nil, userID)
+	_, err := service.UserStore.GetByID(ctx, userID)
 	if err != nil {
 		return nil, errors.New("user not found")
 	}
 
 	// Retrieve wallet
-	wallet, err := service.WalletRepo.GetByUserID(nil, userID)
+	wallet, err := service.WalletStore.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
