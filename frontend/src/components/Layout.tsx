@@ -8,9 +8,10 @@ type LayoutProps = {
 };
 
 const links = [
-  { to: "/", label: "Home" },
+  { to: "/", label: "Home", end: true },
+  { to: "/wallet", label: "Wallet" },
   { to: "/trades/new", label: "New Trade" },
-  { to: "/trades", label: "Trades & Markets" }
+  { to: "/trades", label: "Trades & Markets", end: true }
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -30,9 +31,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               <NavLink
                 key={link.to}
                 to={link.to}
-                className={({ isActive }) =>
-                  `pill${isActive ? " " : ""}`
-                }
+                end={Boolean(link.end)}
+                className={({ isActive }) => `pill${isActive ? " " : ""}`}
                 style={({ isActive }) => ({
                   backgroundColor: isActive ? "rgba(34, 211, 238, 0.12)" : undefined,
                   borderColor: isActive ? "var(--accent)" : "var(--border)"

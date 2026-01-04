@@ -8,6 +8,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { CreateTradePage } from "./pages/CreateTradePage";
 import { HomePage } from "./pages/HomePage";
 import { TradesPage } from "./pages/TradesPage";
+import { WalletPage } from "./pages/WalletPage";
 
 const RoutedApp: React.FC = () => {
   const { token } = useAuth();
@@ -31,6 +32,14 @@ const RoutedApp: React.FC = () => {
           element={
             <ProtectedRoute>
               <CreateTradePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/wallet"
+          element={
+            <ProtectedRoute>
+              <WalletPage />
             </ProtectedRoute>
           }
         />

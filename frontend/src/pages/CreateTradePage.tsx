@@ -1,14 +1,23 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { Trade } from "../types";
 
-const markets = ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD"];
+const currencies = ["USD", "BTC", "ETH", "SOL", "DOGE"];
 
 export const CreateTradePage: React.FC = () => {
-  const [market, setMarket] = useState(markets[0]);
+  const [giveCurrency, setGiveCurrency] = useState("USD");
+  const [receiveCurrency, setReceiveCurrency] = useState("BTC");
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [quantity, setQuantity] = useState(0.25);
   const [price, setPrice] = useState(50000);
   const [preview, setPreview] = useState<Trade | null>(null);
+
+  const market = useMemo(() => `${receiveCurrency}-${giveCurrency}`, [giveCurrency, receiveCurrency]);
+
+  const onSwap = () => {
+    setGiveCurrency(receiveCurrency);
+    setReceiveCurrency(giveCurrency);
+    setSide((prev) => (prev === "buy" ? "sell" : "buy"));
+  };
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,11 +46,31 @@ export const CreateTradePage: React.FC = () => {
 
         <form className="stack" onSubmit={onSubmit}>
           <label className="stack">
-            <span>Market</span>
-            <select value={market} onChange={(e) => setMarket(e.target.value)}>
-              {markets.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+            <span>Pay with</span>
+            <select value={giveCurrency} onChange={(e) => setGiveCurrency(e.target.value)}>
+              {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="inline-actions" style={{ gap: 8 }}>
+            <button type="button" className="ghost-button" onClick={onSwap}>
+              Swap
+            </button>
+            <div className="pill" style={{ flex: 1, textAlign: "center" }}>
+              Market: {market}
+            </div>
+          </div>
+
+          <label className="stack">
+            <span>Buy</span>
+            <select value={receiveCurrency} onChange={(e) => setReceiveCurrency(e.target.value)}>
+              {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
                 </option>
               ))}
             </select>
@@ -74,7 +103,7 @@ export const CreateTradePage: React.FC = () => {
           </label>
 
           <label className="stack">
-            <span>Quantity</span>
+            <span>Quantity (pay with currency)</span>
             <input
               type="number"
               min={0}
@@ -85,12 +114,19 @@ export const CreateTradePage: React.FC = () => {
           </label>
 
           <label className="stack">
-            <span>Limit price</span>
-            <input type="number" min={0} step={0.01} value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+            <span>Limit price (per buy unit in pay currency)</span>
+            <input
+              type="number"
+              min={0}
+              step={0.01}
+              value={price}
+              onChange={(e) => setPrice(Number(e.target.value))}
+            />
           </label>
 
           <div className="pill">
-            <strong>Order value: </strong> {(quantity * price).toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
+            <strong>Order value: </strong>{" "}
+            {(quantity * price).toLocaleString(undefined, { maximumFractionDigits: 2 })} {giveCurrency}
           </div>
 
           <button type="submit">Preview trade</button>
@@ -113,9 +149,9 @@ export const CreateTradePage: React.FC = () => {
               <strong style={{ color: preview.side === "buy" ? "var(--success)" : "var(--danger)" }}>{preview.side}</strong>
             </div>
             <div className="card">
-              <div className="muted">Quantity / Price</div>
+              <div className="muted">Give / Receive</div>
               <strong>
-                {preview.quantity} @ {preview.price} USD
+                {quantity} {giveCurrency} ➜ {receiveCurrency} @ {price} {giveCurrency}
               </strong>
             </div>
             <div className="muted">
