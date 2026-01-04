@@ -24,19 +24,21 @@ func (router *UserRouter) Register(mux *http.ServeMux) {
 
 	mux.Handle(
 		"OPTIONS /users/",
-		withCORS(http.HandlerFunc(emptyHandler)),
+		http.HandlerFunc(emptyHandler),
 	)
+	// TODO: Move this endpoint to auth router
 	mux.Handle(
 		"POST /users",
-		withCORS(http.HandlerFunc(router.UserRegister)),
+		http.HandlerFunc(router.UserRegister),
 	)
+	// TODO: Make this protected. Only user themselves or admin can access
 	mux.Handle(
 		"GET /users/{id}",
-		withCORS(http.HandlerFunc(router.UserGetHandler)),
+		http.HandlerFunc(router.UserGetHandler),
 	)
 	mux.Handle(
 		"GET /users/me",
-		withCORS(auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf))),
+		auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf)),
 	)
 }
 
@@ -52,8 +54,6 @@ func (router *UserRouter) UserRegister(w http.ResponseWriter, r *http.Request) {
 	// Responses:
 	// 201 Created - user successfully registered
 	// 400 Bad Request - invalid request data
-
-	// TODO: Give user 10,000 starting balance in USD
 
 	var userForm models.UserAuth
 

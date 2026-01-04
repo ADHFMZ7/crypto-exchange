@@ -9,7 +9,7 @@ import (
 
 func emptyHandler(w http.ResponseWriter, r *http.Request) {}
 
-func withCORS(h http.Handler) http.Handler {
+func WithCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// React dev server
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
@@ -25,3 +25,5 @@ func withCORS(h http.Handler) http.Handler {
 		h.ServeHTTP(w, r)
 	})
 }
+
+// util functions for middleware chaining

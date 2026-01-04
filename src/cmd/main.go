@@ -4,11 +4,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/ADHFMZ7/crypto-exchange/internal/api"
 	"github.com/ADHFMZ7/crypto-exchange/config"
+	"github.com/ADHFMZ7/crypto-exchange/internal/api"
 	"github.com/ADHFMZ7/crypto-exchange/internal/db"
-	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
 
 func main() {
@@ -25,6 +25,9 @@ func main() {
 	services := services.NewServices(stores)
 	mux := api.NewRouter(services)
 
+	var h http.Handler = mux
+	h = api.WithCORS(h) // global
+
 	log.Print("starting server on ", config.Server.GetURL())
-	log.Fatal(http.ListenAndServe(config.Server.GetURL(), mux))
+	log.Fatal(http.ListenAndServe(config.Server.GetURL(), h))
 }

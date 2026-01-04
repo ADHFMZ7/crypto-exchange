@@ -23,15 +23,15 @@ func (router *AuthRouter) Register(mux *http.ServeMux) {
 
 	mux.Handle(
 		"OPTIONS /auth/",
-		withCORS(http.HandlerFunc(emptyHandler)),
+		http.HandlerFunc(emptyHandler),
 	)
 	mux.Handle(
 		"POST /auth/login",
-		withCORS(http.HandlerFunc(router.LoginHandler)),
+		http.HandlerFunc(router.LoginHandler),
 	)
 	mux.Handle(
 		"POST /auth/logout",
-		withCORS(http.HandlerFunc(router.LogoutHandler)),
+		http.HandlerFunc(router.LogoutHandler),
 	)
 }
 

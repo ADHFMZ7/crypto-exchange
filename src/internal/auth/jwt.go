@@ -22,7 +22,7 @@ type ctxKey string
 const (
 	CtxUserKey ctxKey = "user_id"
 	// default token TTL for generated tokens
-	defaultTTL = 15 * time.Minute
+	defaultTTL = 150 * time.Minute
 )
 
 // Claims is the minimal JWT claims payload we use.
