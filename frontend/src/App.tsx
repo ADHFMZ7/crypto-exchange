@@ -1,26 +1,73 @@
-import { AuthProvider } from './contexts/AuthContext'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import AuthPage from './pages/AuthPage'
-import HomePage from './pages/HomePage'
-import Header from './components/Header'
-import { lightTheme } from './ui/theme'
+import React from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AuthProvider, useAuth } from "./hooks/useAuth";
+import { ThemeProvider } from "./hooks/useTheme";
+import { AuthPage } from "./pages/AuthPage";
+import { CreateTradePage } from "./pages/CreateTradePage";
+import { HomePage } from "./pages/HomePage";
+import { TradesPage } from "./pages/TradesPage";
+import { WalletPage } from "./pages/WalletPage";
 
-export default function App() {
+const RoutedApp: React.FC = () => {
+  const { token } = useAuth();
+
   return (
-    <div style={lightTheme.page}>
-      <div style={lightTheme.card}>
-        <AuthProvider>
-          <BrowserRouter>
-            <Header />
-            <div style={{ padding: 16 }}>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/auth" element={<AuthPage />} />
-              </Routes>
-            </div>
-          </BrowserRouter>
-        </AuthProvider>
-      </div>
-    </div>
-  )
-}
+    <Layout>
+      <Routes>
+        <Route path="/login" element={<AuthPage mode="login" />} />
+        <Route path="/signup" element={<AuthPage mode="signup" />} />
+
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <HomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/trades/new"
+          element={
+            <ProtectedRoute>
+              <CreateTradePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/wallet"
+          element={
+            <ProtectedRoute>
+              <WalletPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/trades"
+          element={
+            <ProtectedRoute>
+              <TradesPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route path="*" element={<Navigate to={token ? "/" : "/login"} replace />} />
+      </Routes>
+    </Layout>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <RoutedApp />
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
+  );
+};
+
+export default App;
