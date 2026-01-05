@@ -27,7 +27,6 @@ type UserAuth struct {
 type Currency struct {
 	Code     string `json:"code"`     // e.g. USD, BTC
 	Name     string `json:"name"`     // e.g. US Dollar, Bitcoin
-	Symbol   string `json:"symbol"`   // e.g. $, ₿
 	Exponent int    `json:"exponent"` // number of decimal places
 }
 
@@ -37,6 +36,14 @@ type Balance struct {
 	Currency string  `json:"currency"` // e.g. USD, BTC
 	Amount   float64 `json:"amount"`
 }
+
+// TODO: Switch to this balance later so we can maintain info abt it
+// type Balance struct {
+// 	ID       int64    `json:"id"`
+// 	UserID   int64    `json:"user_id"`
+// 	Currency Currency `json:"currency"` // e.g. USD, BTC
+// 	Amount   float64  `json:"amount"`
+// }
 
 type Wallet struct {
 	UserID   int64     `json:"user_id"`

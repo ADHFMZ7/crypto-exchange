@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16
+    container_name: crypto-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    container_name: crypto-migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./sql/migrations:/migrations
+    command: >
+      -path=/migrations
+      -database=${DATABASE_URL}
+      up
+    restart: "no"
+
+  api:
+    build: .
+    container_name: crypto-api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SERVER_HOST: ${SERVER_HOST}
+      SERVER_PORT: ${SERVER_PORT}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+

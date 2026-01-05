@@ -23,7 +23,7 @@ func (server ConfServer) GetURL() string {
 }
 
 type ConfDB struct {
-		URL string
+	URL string
 	// Host     string
 	// Port     int
 	// Username string
@@ -34,9 +34,8 @@ type ConfDB struct {
 func New() *Conf {
 	var c Conf
 
-	err := godotenv.Load()	
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if err := godotenv.Load(); err != nil {
+		log.Printf("No .env file found (ok): %v", err)
 	}
 
 	c.DB.URL = os.Getenv("DATABASE_URL")

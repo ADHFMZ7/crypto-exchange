@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -19,8 +17,9 @@ import (
 
 type ctxKey string
 
+type CtxUserKey struct{}
+
 const (
-	CtxUserKey ctxKey = "user_id"
 	// default token TTL for generated tokens
 	defaultTTL = 150 * time.Minute
 )
@@ -78,7 +77,7 @@ func GenerateJWT(userID string, ttl time.Duration) (string, error) {
 	return token, nil
 }
 
-func ValidateJWT(authHeader string) (int, bool) {
+func ValidateJWT(authHeader string) (int64, bool) {
 	// ValidateJWT verifies the token signature and expiration. It accepts either
 	// the raw token or a header value starting with "Bearer ". Returns the subject
 	// (user id) and true on success.
@@ -124,7 +123,7 @@ func ValidateJWT(authHeader string) (int, bool) {
 	if err != nil {
 		return -1, false
 	}
-	return id, true
+	return int64(id), true
 }
 
 func sign(data []byte) []byte {
@@ -134,35 +133,13 @@ func sign(data []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func AuthMiddleware(next http.Handler) http.Handler {
-	// AuthMiddleware checks the Authorization header for a valid JWT and, on
-	// success, injects the user id into the request context under the key
-	// `user_id`.
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		uid, ok := ValidateJWT(auth)
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		fmt.Println("Authenticated user ID:", uid)
-		ctx := context.WithValue(r.Context(), CtxUserKey, uid)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func UserIDFromContext(ctx context.Context) (string, bool) {
+func UserIDFromContext(ctx context.Context) (int64, bool) {
 	// UserIDFromContext retrieves the user id (subject) from a request context.
 
-	v := ctx.Value(CtxUserKey)
+	v := ctx.Value(CtxUserKey{})
 	if v == nil {
-		return "", false
+		return -1, false
 	}
-	s, ok := v.(string)
+	s, ok := v.(int64)
 	return s, ok
 }

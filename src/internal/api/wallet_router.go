@@ -24,7 +24,7 @@ func (router *WalletRouter) Register(mux *http.ServeMux) {
 	)
 	mux.Handle(
 		"GET /wallets/me",
-		auth.AuthMiddleware(http.HandlerFunc(router.GetWalletSelf)),
+		Authenticate(http.HandlerFunc(router.GetWalletSelf)),
 	)
 }
 
@@ -41,13 +41,12 @@ func (router *WalletRouter) GetWalletSelf(w http.ResponseWriter, r *http.Request
 	// 404 Not Found - wallet not found
 
 	ctx := r.Context()
-	// userID, ok := ctx.Value(auth.CtxUserKey).(int64)
-	userID := int64(r.Context().Value(auth.CtxUserKey).(int))
+	userID, ok := r.Context().Value(auth.CtxUserKey{}).(int64)
 
-	// if !ok {
-	// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
-	// 	return
-	// }
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	wallet, err := router.Services.Wallets.GetWalletByUserID(ctx, userID)
 	if err != nil {

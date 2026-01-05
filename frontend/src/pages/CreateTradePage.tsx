@@ -12,6 +12,16 @@ export const CreateTradePage: React.FC = () => {
   const [preview, setPreview] = useState<Trade | null>(null);
 
   const market = useMemo(() => `${receiveCurrency}-${giveCurrency}`, [giveCurrency, receiveCurrency]);
+  const primaryLabel = side === "buy" ? "Pay with" : "Sell from";
+  const secondaryLabel = side === "buy" ? "Buy" : "Receive in";
+  const quantityLabel = side === "buy" ? "Amount to spend" : "Amount to sell";
+  const priceLabel =
+    side === "buy"
+      ? `Limit price (per ${receiveCurrency} in ${giveCurrency})`
+      : `Limit price (per ${giveCurrency} in ${receiveCurrency})`;
+  const notionalLabel = side === "buy" ? "Estimated cost" : "Estimated proceeds";
+  const notionalCurrency = side === "buy" ? giveCurrency : receiveCurrency;
+  const priceDenomination = side === "buy" ? giveCurrency : receiveCurrency;
 
   const onSwap = () => {
     setGiveCurrency(receiveCurrency);
@@ -36,100 +46,101 @@ export const CreateTradePage: React.FC = () => {
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="panel">
-        <div className="headline">
-          <div>
+        <div className="headline" style={{ alignItems: "flex-start" }}>
+          <div className="stack" style={{ gap: 6 }}>
             <div className="tag">Trade ticket</div>
-            <h2 style={{ margin: "4px 0" }}>Create a trade</h2>
+            <h2 style={{ margin: 0 }}>Create a trade</h2>
             <div className="muted">This is a front-end only template until trading APIs exist.</div>
+          </div>
+          <div className="inline-actions" style={{ gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setSide("buy")}
+              style={{
+                background: side === "buy" ? "var(--accent)" : "rgba(255,255,255,0.05)",
+                color: side === "buy" ? "#0b1020" : "var(--text)",
+                padding: "8px 12px"
+              }}
+            >
+              Buy
+            </button>
+            <button
+              type="button"
+              onClick={() => setSide("sell")}
+              style={{
+                background: side === "sell" ? "var(--accent)" : "rgba(255,255,255,0.05)",
+                color: side === "sell" ? "#0b1020" : "var(--text)",
+                padding: "8px 12px"
+              }}
+            >
+              Sell
+            </button>
           </div>
         </div>
 
-        <form className="stack" onSubmit={onSubmit}>
-          <label className="stack">
-            <span>Pay with</span>
-            <select value={giveCurrency} onChange={(e) => setGiveCurrency(e.target.value)}>
-              {currencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
+        <form className="stack" style={{ gap: 14 }} onSubmit={onSubmit}>
+          <div className="inline-actions" style={{ alignItems: "flex-end" }}>
+            <label className="stack" style={{ flex: 1 }}>
+              <span>{primaryLabel}</span>
+              <select value={giveCurrency} onChange={(e) => setGiveCurrency(e.target.value)}>
+                {currencies.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <div className="inline-actions" style={{ gap: 8 }}>
-            <button type="button" className="ghost-button" onClick={onSwap}>
+            <button type="button" className="ghost-button" onClick={onSwap} style={{ alignSelf: "stretch" }}>
               Swap
             </button>
-            <div className="pill" style={{ flex: 1, textAlign: "center" }}>
-              Market: {market}
-            </div>
+
+            <label className="stack" style={{ flex: 1 }}>
+              <span>{secondaryLabel}</span>
+              <select value={receiveCurrency} onChange={(e) => setReceiveCurrency(e.target.value)}>
+                {currencies.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
-          <label className="stack">
-            <span>Buy</span>
-            <select value={receiveCurrency} onChange={(e) => setReceiveCurrency(e.target.value)}>
-              {currencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="pill" style={{ textAlign: "center" }}>
+            Market: {market}
+          </div>
 
-          <label className="stack">
-            <span>Side</span>
-            <div className="inline-actions">
-              <button
-                type="button"
-                onClick={() => setSide("buy")}
-                style={{
-                  background: side === "buy" ? "var(--accent)" : "rgba(255,255,255,0.05)",
-                  color: side === "buy" ? "#0b1020" : "var(--text)"
-                }}
-              >
-                Buy
-              </button>
-              <button
-                type="button"
-                onClick={() => setSide("sell")}
-                style={{
-                  background: side === "sell" ? "var(--accent)" : "rgba(255,255,255,0.05)",
-                  color: side === "sell" ? "#0b1020" : "var(--text)"
-                }}
-              >
-                Sell
-              </button>
-            </div>
-          </label>
+          <div className="inline-actions">
+            <label className="stack" style={{ flex: 1 }}>
+              <span>{quantityLabel}</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value))}
+              />
+            </label>
 
-          <label className="stack">
-            <span>Quantity (pay with currency)</span>
-            <input
-              type="number"
-              min={0}
-              step={0.01}
-              value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-            />
-          </label>
-
-          <label className="stack">
-            <span>Limit price (per buy unit in pay currency)</span>
-            <input
-              type="number"
-              min={0}
-              step={0.01}
-              value={price}
-              onChange={(e) => setPrice(Number(e.target.value))}
-            />
-          </label>
+            <label className="stack" style={{ flex: 1 }}>
+              <span>{priceLabel}</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={price}
+                onChange={(e) => setPrice(Number(e.target.value))}
+              />
+            </label>
+          </div>
 
           <div className="pill">
-            <strong>Order value: </strong>{" "}
-            {(quantity * price).toLocaleString(undefined, { maximumFractionDigits: 2 })} {giveCurrency}
+            <strong>{notionalLabel}: </strong>{" "}
+            {(quantity * price).toLocaleString(undefined, { maximumFractionDigits: 2 })} {notionalCurrency}
           </div>
 
-          <button type="submit">Preview trade</button>
+          <button type="submit">Preview {side === "buy" ? "buy" : "sell"} order</button>
         </form>
       </div>
 
@@ -151,7 +162,7 @@ export const CreateTradePage: React.FC = () => {
             <div className="card">
               <div className="muted">Give / Receive</div>
               <strong>
-                {quantity} {giveCurrency} ➜ {receiveCurrency} @ {price} {giveCurrency}
+                {quantity} {giveCurrency} ➜ {receiveCurrency} @ {price} {priceDenomination}
               </strong>
             </div>
             <div className="muted">

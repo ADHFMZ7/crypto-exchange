@@ -37,7 +37,7 @@ func (router *UserRouter) Register(mux *http.ServeMux) {
 	)
 	mux.Handle(
 		"GET /users/me",
-		auth.AuthMiddleware(http.HandlerFunc(router.UserGetSelf)),
+		Authenticate(http.HandlerFunc(router.UserGetSelf)),
 	)
 }
 
@@ -109,9 +109,14 @@ func (router *UserRouter) UserGetSelf(w http.ResponseWriter, r *http.Request) {
 	// 200 OK - user info returned
 	// 401 Unauthorized - user not authenticated
 
-	userID := int64(r.Context().Value(auth.CtxUserKey).(int))
+	ctx := r.Context()
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	user, err := router.Services.Users.GetUserByID(r.Context(), userID)
+	user, err := router.Services.Users.GetUserByID(ctx, userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
