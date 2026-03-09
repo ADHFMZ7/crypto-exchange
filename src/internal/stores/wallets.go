@@ -16,7 +16,7 @@ func (store *WalletStore) GetByUserID(ctx context.Context, userID int64) (*model
 	wallet.UserID = userID
 
 	rows, err := store.pool.Query(ctx,
-		`SELECT id, user_id, currency, balance FROM balance WHERE user_id = $1`,
+		`SELECT id, user_id, currency, balance FROM balances WHERE user_id = $1`,
 		userID,
 	)
 	if err != nil {
@@ -34,4 +34,29 @@ func (store *WalletStore) GetByUserID(ctx context.Context, userID int64) (*model
 	}
 
 	return &wallet, nil
+}
+
+// TODO: Switch to use currency obj later?
+func (store *WalletStore) GetUserBalance(ctx context.Context, userID int64, currency string) (int64, error) {
+
+	var balance int64
+
+	err := store.pool.QueryRow(ctx,
+		`SELECT balance FROM balances WHERE user_id = $1 AND currency = $2`,
+		userID, currency,
+	).Scan(&balance)
+	if err != nil {
+		return -1, err
+	}
+
+	return balance, nil
+}
+
+func (store *WalletStore) ModfyBalance(ctx context.Context, userID, newBalance int64) error {
+
+	_, err := store.pool.Exec(ctx,
+		`UPDATE balances SET balance = $1 WHERE user_id = $2`,
+		newBalance, userID)
+
+	return err
 }

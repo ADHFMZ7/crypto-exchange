@@ -35,3 +35,19 @@ func (service *WalletService) GetWalletByUserID(ctx context.Context, userID int6
 
 	return wallet, nil
 }
+
+func (service *WalletService) DepositToWallet(ctx context.Context, userID int64, amount int64) error {
+
+	usdBalance, err := service.WalletStore.GetUserBalance(ctx, userID, "USD")
+	if err != nil {
+		return err
+	}
+
+	newBalance := usdBalance + amount
+
+	if newBalance < 0 {
+		return errors.New("Transaction makes balance invalid")
+	}
+
+	return service.WalletStore.ModfyBalance(ctx, userID, newBalance)
+}

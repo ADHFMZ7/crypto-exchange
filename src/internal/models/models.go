@@ -23,6 +23,11 @@ type UserAuth struct {
 	Password string
 }
 
+type BalanceChange struct {
+	// UserID int64
+	Amount int64
+}
+
 // TODO: Use this model when implementing multi-currency support
 type Currency struct {
 	Code     string `json:"code"`     // e.g. USD, BTC
