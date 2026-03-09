@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
+	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
@@ -25,6 +26,10 @@ func (router *WalletRouter) Register(mux *http.ServeMux) {
 	mux.Handle(
 		"GET /wallets/me",
 		Authenticate(http.HandlerFunc(router.GetWalletSelf)),
+	)
+	mux.Handle(
+		"PATCH /wallets/me",
+		Authenticate(http.HandlerFunc(router.DepositToWallet)),
 	)
 }
 
@@ -59,4 +64,36 @@ func (router *WalletRouter) GetWalletSelf(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// TODO: We should probably do this as a transaction later
+func (router *WalletRouter) DepositToWallet(w http.ResponseWriter, r *http.Request) {
+	// PATCH /wallets/me - get wallet of authenticated user
+	// Responses:
+	// 200 OK - wallet retrieved successfully
+	// 401 Unauthorized - user not authenticated
+	// 404 Not Found - wallet not found
+
+	ctx := r.Context()
+	userID, ok := ctx.Value(auth.CtxUserKey{}).(int64)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var wallet models.BalanceChange
+
+	err := json.NewDecoder(r.Body).Decode(&wallet)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = router.Services.Wallets.DepositToWallet(ctx, userID, wallet.Amount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// For now we just return success, but later we will return tx id.
 }
