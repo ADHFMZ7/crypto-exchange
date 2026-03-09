@@ -1,46 +1,90 @@
 import React, { useMemo, useState } from "react";
-import type { Trade } from "../types";
+import { useAuth } from "../hooks/useAuth";
 
-const currencies = ["USD", "BTC", "ETH", "SOL", "DOGE"];
+type TradeType = "limit_buy" | "limit_sell" | "cancel";
+type SubmitResult = {
+  status: string;
+  order_id: number;
+  market: string;
+  type: string;
+  receivedAt: string;
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const supportedMarkets = ["BTC-USD"];
 
 export const CreateTradePage: React.FC = () => {
-  const [giveCurrency, setGiveCurrency] = useState("USD");
-  const [receiveCurrency, setReceiveCurrency] = useState("BTC");
-  const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [quantity, setQuantity] = useState(0.25);
+  const { token } = useAuth();
+  const [market, setMarket] = useState(supportedMarkets[0]);
+  const [type, setType] = useState<TradeType>("limit_buy");
+  const [shares, setShares] = useState(1);
   const [price, setPrice] = useState(50000);
-  const [preview, setPreview] = useState<Trade | null>(null);
+  const [cancelOrderID, setCancelOrderID] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  const [result, setResult] = useState<SubmitResult | null>(null);
 
-  const market = useMemo(() => `${receiveCurrency}-${giveCurrency}`, [giveCurrency, receiveCurrency]);
-  const primaryLabel = side === "buy" ? "Pay with" : "Sell from";
-  const secondaryLabel = side === "buy" ? "Buy" : "Receive in";
-  const quantityLabel = side === "buy" ? "Amount to spend" : "Amount to sell";
-  const priceLabel =
-    side === "buy"
-      ? `Limit price (per ${receiveCurrency} in ${giveCurrency})`
-      : `Limit price (per ${giveCurrency} in ${receiveCurrency})`;
-  const notionalLabel = side === "buy" ? "Estimated cost" : "Estimated proceeds";
-  const notionalCurrency = side === "buy" ? giveCurrency : receiveCurrency;
-  const priceDenomination = side === "buy" ? giveCurrency : receiveCurrency;
+  const isCancel = type === "cancel";
+  const notional = useMemo(() => shares * price, [price, shares]);
 
-  const onSwap = () => {
-    setGiveCurrency(receiveCurrency);
-    setReceiveCurrency(giveCurrency);
-    setSide((prev) => (prev === "buy" ? "sell" : "buy"));
-  };
-
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trade: Trade = {
-      id: crypto.randomUUID(),
+    if (!token) {
+      setError("You must be logged in.");
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
       market,
-      side,
-      quantity,
-      price,
-      status: "open",
-      placedAt: new Date().toISOString()
+      type
     };
-    setPreview(trade);
+
+    if (isCancel) {
+      const parsedID = Number(cancelOrderID);
+      if (!Number.isInteger(parsedID) || parsedID <= 0) {
+        setError("Cancel requests require a valid positive order ID.");
+        return;
+      }
+      payload.order_id = parsedID;
+    } else {
+      if (!Number.isInteger(shares) || !Number.isInteger(price) || shares <= 0 || price <= 0) {
+        setError("Shares and price must be positive integers.");
+        return;
+      }
+      payload.shares = shares;
+      payload.price = price;
+    }
+
+    setLoading(true);
+    setError(undefined);
+    setResult(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/trades`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(message || `Request failed: ${res.status}`);
+      }
+
+      const data = (await res.json()) as SubmitResult;
+      setResult(data);
+      if (isCancel) {
+        setCancelOrderID("");
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Failed to submit trade request");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -48,127 +92,107 @@ export const CreateTradePage: React.FC = () => {
       <div className="panel">
         <div className="headline" style={{ alignItems: "flex-start" }}>
           <div className="stack" style={{ gap: 6 }}>
-            <div className="tag">Trade ticket</div>
-            <h2 style={{ margin: 0 }}>Create a trade</h2>
-            <div className="muted">This is a front-end only template until trading APIs exist.</div>
-          </div>
-          <div className="inline-actions" style={{ gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setSide("buy")}
-              style={{
-                background: side === "buy" ? "var(--accent)" : "rgba(255,255,255,0.05)",
-                color: side === "buy" ? "#0b1020" : "var(--text)",
-                padding: "8px 12px"
-              }}
-            >
-              Buy
-            </button>
-            <button
-              type="button"
-              onClick={() => setSide("sell")}
-              style={{
-                background: side === "sell" ? "var(--accent)" : "rgba(255,255,255,0.05)",
-                color: side === "sell" ? "#0b1020" : "var(--text)",
-                padding: "8px 12px"
-              }}
-            >
-              Sell
-            </button>
+            <div className="tag">Trade API</div>
+            <h2 style={{ margin: 0 }}>Submit trade request</h2>
+            <div className="muted">Connected to `POST /trades`. Current backend queue supports `BTC-USD`.</div>
           </div>
         </div>
 
         <form className="stack" style={{ gap: 14 }} onSubmit={onSubmit}>
-          <div className="inline-actions" style={{ alignItems: "flex-end" }}>
-            <label className="stack" style={{ flex: 1 }}>
-              <span>{primaryLabel}</span>
-              <select value={giveCurrency} onChange={(e) => setGiveCurrency(e.target.value)}>
-                {currencies.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="stack">
+            <span>Market</span>
+            <select value={market} onChange={(e) => setMarket(e.target.value)}>
+              {supportedMarkets.map((symbol) => (
+                <option key={symbol} value={symbol}>
+                  {symbol}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <button type="button" className="ghost-button" onClick={onSwap} style={{ alignSelf: "stretch" }}>
-              Swap
-            </button>
+          <label className="stack">
+            <span>Type</span>
+            <select value={type} onChange={(e) => setType(e.target.value as TradeType)}>
+              <option value="limit_buy">Limit Buy</option>
+              <option value="limit_sell">Limit Sell</option>
+              <option value="cancel">Cancel</option>
+            </select>
+          </label>
 
-            <label className="stack" style={{ flex: 1 }}>
-              <span>{secondaryLabel}</span>
-              <select value={receiveCurrency} onChange={(e) => setReceiveCurrency(e.target.value)}>
-                {currencies.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="pill" style={{ textAlign: "center" }}>
-            Market: {market}
-          </div>
-
-          <div className="inline-actions">
-            <label className="stack" style={{ flex: 1 }}>
-              <span>{quantityLabel}</span>
+          {isCancel ? (
+            <label className="stack">
+              <span>Order ID to cancel</span>
               <input
                 type="number"
-                min={0}
-                step={0.01}
-                value={quantity}
-                onChange={(e) => setQuantity(Number(e.target.value))}
+                min={1}
+                step={1}
+                value={cancelOrderID}
+                onChange={(e) => setCancelOrderID(e.target.value)}
+                placeholder="e.g. 42"
+                required
               />
             </label>
+          ) : (
+            <div className="inline-actions">
+              <label className="stack" style={{ flex: 1 }}>
+                <span>Shares (int64)</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={shares}
+                  onChange={(e) => setShares(Number(e.target.value))}
+                  required
+                />
+              </label>
 
-            <label className="stack" style={{ flex: 1 }}>
-              <span>{priceLabel}</span>
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                value={price}
-                onChange={(e) => setPrice(Number(e.target.value))}
-              />
-            </label>
-          </div>
+              <label className="stack" style={{ flex: 1 }}>
+                <span>Price (int64)</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={price}
+                  onChange={(e) => setPrice(Number(e.target.value))}
+                  required
+                />
+              </label>
+            </div>
+          )}
 
-          <div className="pill">
-            <strong>{notionalLabel}: </strong>{" "}
-            {(quantity * price).toLocaleString(undefined, { maximumFractionDigits: 2 })} {notionalCurrency}
-          </div>
+          {!isCancel && (
+            <div className="pill">
+              <strong>Notional:</strong> {notional.toLocaleString()}
+            </div>
+          )}
 
-          <button type="submit">Preview {side === "buy" ? "buy" : "sell"} order</button>
+          {error && <div className="pill status-danger">{error}</div>}
+          <button type="submit" disabled={loading}>
+            {loading ? "Submitting..." : "Submit request"}
+          </button>
         </form>
       </div>
 
-      {preview && (
+      {result && (
         <div className="panel">
           <div className="headline">
-            <h3 style={{ margin: 0 }}>Preview</h3>
-            <div className="tag">{preview.status}</div>
+            <h3 style={{ margin: 0 }}>Server response</h3>
+            <span className="tag status-success">{result.status}</span>
           </div>
           <div className="stack">
             <div className="card">
+              <div className="muted">Order ID</div>
+              <strong>{result.order_id}</strong>
+            </div>
+            <div className="card">
               <div className="muted">Market</div>
-              <strong>{preview.market}</strong>
+              <strong>{result.market}</strong>
             </div>
             <div className="card">
-              <div className="muted">Side</div>
-              <strong style={{ color: preview.side === "buy" ? "var(--success)" : "var(--danger)" }}>{preview.side}</strong>
+              <div className="muted">Type</div>
+              <strong>{result.type}</strong>
             </div>
-            <div className="card">
-              <div className="muted">Give / Receive</div>
-              <strong>
-                {quantity} {giveCurrency} ➜ {receiveCurrency} @ {price} {priceDenomination}
-              </strong>
-            </div>
-            <div className="muted">
-              Submission is local only. Wire this to the backend trade endpoint once available, and pipe the response into
-              the trades list.
-            </div>
+            <div className="muted">Received at: {new Date(result.receivedAt).toLocaleString()}</div>
           </div>
         </div>
       )}
