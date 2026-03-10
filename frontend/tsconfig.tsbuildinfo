@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/layout.tsx","./src/components/protectedroute.tsx","./src/hooks/useauth.tsx","./src/hooks/usetheme.tsx","./src/pages/authpage.tsx","./src/pages/createtradepage.tsx","./src/pages/homepage.tsx","./src/pages/tradespage.tsx","./src/pages/walletpage.tsx"],"version":"5.9.3"}
