@@ -65,16 +65,18 @@ func (store *WalletStore) ModifyBalance(ctx context.Context, userID, newBalance 
 }
 
 
-func (store *WalletStore) LockFundsIfExist(ctx context.Context, userID int64, currency models.Currency, amount int64) error {
+func (store *WalletStore) PlaceOrder(ctx context.Context, 
+	userID int64, currency string, amount, price int64, side, market string) (int64, error) {
 
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return err
+		return -1, err
 	}
 	defer tx.Rollback(ctx) // no-op if already committed
 
     var available int64
     var locked int64
+	var orderID int64
 
 	err = tx.QueryRow(ctx, `
         UPDATE balances
@@ -90,19 +92,20 @@ func (store *WalletStore) LockFundsIfExist(ctx context.Context, userID int64, cu
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-            return fmt.Errorf("insufficient funds")
+            return -1, fmt.Errorf("insufficient funds")
         }
-        return err
+        return -1, err
 	}
 
-	_, err = tx.Exec(ctx, `
-        INSERT INTO orders (user_id, currency, amount, status)
-        VALUES ($1, $2, $3, 'OPEN')
-    `, userID, currency, amount)
-    if err != nil {
-        return err
-    }
-	
-	return tx.Commit(ctx)
+	err = tx.QueryRow(ctx, `
+		INSERT INTO orders (user_id, quantity, price_each, side, market, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, userID, amount, price, side, market, "OPEN").Scan(&orderID)
 
+	if err != nil {
+		return -1, err
+	}
+	
+	return orderID, tx.Commit(ctx)
 }

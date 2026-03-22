@@ -51,3 +51,4 @@ func (service *WalletService) DepositToWallet(ctx context.Context, userID int64,
 
 	return service.WalletStore.ModfyBalance(ctx, userID, newBalance)
 }
+

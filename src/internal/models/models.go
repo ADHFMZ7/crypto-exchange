@@ -39,15 +39,16 @@ type Balance struct {
 	ID       int64   `json:"id"`
 	UserID   int64   `json:"user_id"`
 	Currency string  `json:"currency"` // e.g. USD, BTC
-	Amount   float64 `json:"amount"`
+	Available int64  `json:"available"`
+	Locked    int64  `json:"locked"`
 }
 
-// TODO: Switch to this balance later so we can maintain info abt it
 // type Balance struct {
-// 	ID       int64    `json:"id"`
-// 	UserID   int64    `json:"user_id"`
-// 	Currency Currency `json:"currency"` // e.g. USD, BTC
-// 	Amount   float64  `json:"amount"`
+// 	ID        int64     `json:"id"`
+// 	UserID    int64     `json:"user_id"`
+// 	Currency  *Currency `json:"currency"` // e.g. USD, BTC
+// 	Available int64     `json:"available"`
+// 	Locked    int64     `json:"locked"`
 // }
 
 type Wallet struct {
