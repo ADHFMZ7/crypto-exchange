@@ -60,7 +60,7 @@ func (store *UserStore) GiveBalance(ctx context.Context, userID int64, currency 
 	// Give new user a starting balance
 
 	_, err := store.db.Exec(ctx,
-		`INSERT INTO balance (user_id, currency, balance) VALUES ($1, $2, $3)`,
+		`INSERT INTO balances (user_id, currency, available) VALUES ($1, $2, $3)`,
 		userID,
 		currency,
 		amount, // in cents
