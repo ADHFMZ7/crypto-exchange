@@ -59,11 +59,7 @@ func (router *WalletRouter) GetWalletSelf(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err = json.NewEncoder(w).Encode(wallet)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, wallet)
 }
 
 // TODO: We should probably do this as a transaction later

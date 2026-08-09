@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // create table users (
 //   id serial primary key
 //   fname text,
@@ -28,17 +30,10 @@ type BalanceChange struct {
 	Amount int64
 }
 
-// TODO: Use this model when implementing multi-currency support
-type Currency struct {
-	Code     string `json:"code"`     // e.g. USD, BTC
-	Name     string `json:"name"`     // e.g. US Dollar, Bitcoin
-	Exponent int    `json:"exponent"` // number of decimal places
-}
-
 type Balance struct {
-	ID       int64   `json:"id"`
-	UserID   int64   `json:"user_id"`
-	Currency string  `json:"currency"` // e.g. USD, BTC
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Currency  string `json:"currency"` // e.g. USD, BTC
 	Available int64  `json:"available"`
 	Locked    int64  `json:"locked"`
 }
@@ -56,11 +51,39 @@ type Wallet struct {
 	Balances []Balance `json:"balances"`
 }
 
+type Orders struct {
+	Orders []Order `json:"orders"`
+}
+
+// Order status values, mirroring the orders_status_valid CHECK added in
+// migration 000003. Anything not in that constraint fails on insert, which is
+// the intended direction of enforcement.
+const (
+	OrderOpen            = "open"
+	OrderPartiallyFilled = "partially_filled"
+	OrderFilled          = "filled"
+	OrderCancelled       = "cancelled"
+)
+
+// Order is one limit order.
+//
+// Every amount is an integer count of minor units. Quantity and FilledQuantity
+// are BASE minor units (satoshis on BTC-USD); PriceEach is QUOTE minor units
+// per ONE WHOLE base unit (cents per whole BTC). None of them are floats —
+// float64 cannot hold integers above 2^53 exactly, which is the error class
+// minor units exist to remove.
+//
+// UserID is deliberately absent: this is only ever returned to the user whose
+// orders these are, so repeating their id on every row says nothing.
 type Order struct {
-	UserID    int64   `json:"user_id"`
-	Quantity  float64 `json:"quantity"`
-	PriceEach float64 `json:"price_each"`
-	Side      string  `json:"side"`   // buy or sell
-	Market    string  `json:"market"` // e.g. BTC-USD
-	Status    string  `json:"status"` // open, filled, cancelled
+	ID     int64  `json:"id"`     // what DELETE /orders/{id} takes
+	Market string `json:"market"` // symbol, e.g. BTC-USD
+
+	Side           string `json:"side"`            // buy or sell
+	Quantity       int64  `json:"quantity"`        // base minor units
+	FilledQuantity int64  `json:"filled_quantity"` // base minor units, 0..Quantity
+	PriceEach      int64  `json:"price_each"`      // quote minor units per whole base
+
+	Status    string    `json:"status"`     // see the Order* constants above
+	CreatedAt time.Time `json:"created_at"` // marshals to RFC3339
 }

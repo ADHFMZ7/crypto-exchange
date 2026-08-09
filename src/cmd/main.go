@@ -7,6 +7,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/config"
 	"github.com/ADHFMZ7/crypto-exchange/internal/api"
 	"github.com/ADHFMZ7/crypto-exchange/internal/db"
+	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
@@ -21,8 +22,11 @@ func main() {
 	}
 	defer dbpool.Close()
 
+	currencies, markets := market.Default()
+	registry, _ := market.NewMarketRegistry(currencies, markets)
+
 	stores := stores.NewStores(dbpool)
-	services := services.NewServices(stores)
+	services := services.NewServices(stores, registry)
 	mux := api.NewRouter(services)
 
 	var h http.Handler = mux
