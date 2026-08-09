@@ -26,30 +26,47 @@ export type Wallet = {
   balances: WalletBalance[];
 };
 
-export type TradeType = "limit_buy" | "limit_sell" | "cancel";
+/** Which side of the base currency an order takes. */
+export type Side = "buy" | "sell";
 
-/** The 202 body returned by POST /trades. */
-export type TradeAck = {
+/**
+ * Order lifecycle, mirroring the orders_status_valid CHECK in migration 000003.
+ *
+ * `partially_filled` cannot occur until the matching engine reports fills, so
+ * everything currently reads `open` — which is accurate, not a placeholder.
+ */
+export type OrderStatus = "open" | "partially_filled" | "filled" | "cancelled";
+
+/** The 202 body returned by POST /orders. */
+export type OrderAck = {
   status: string;
   order_id: number;
   market: string;
-  type: string;
   receivedAt: string;
 };
 
 /**
- * An order this browser submitted. The backend has no GET /orders yet, so the
- * only record of a submission is the ack we keep client-side. See lib/orderLog.
+ * One order, as returned by GET /orders. Mirrors models.Order.
+ *
+ * Amounts are integer minor units: `quantity` and `filled_quantity` in BASE
+ * minor units (satoshis on BTC-USD), `price_each` in QUOTE minor units per one
+ * WHOLE base unit (cents per whole BTC). Read them through toAmount rather than
+ * as raw numbers — see lib/decimal.
  */
-export type LocalOrder = {
-  order_id: number;
+export type Order = {
+  id: number;
   market: string;
-  type: TradeType;
-  /** Base minor units — satoshis on a BTC-base market. Null for a cancel. */
-  shares: number | null;
-  /** Quote minor units per ONE WHOLE base unit — cents per whole BTC. */
-  price: number | null;
-  submittedAt: string;
+  side: Side;
+  quantity: number;
+  filled_quantity: number;
+  price_each: number;
+  status: OrderStatus;
+  created_at: string;
+};
+
+/** GET /orders wraps its list so pagination can be added without breaking it. */
+export type OrdersResponse = {
+  orders: Order[];
 };
 
 export type MarketTicker = {

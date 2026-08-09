@@ -1,102 +1,144 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
 import { IntegrationStatus } from "../components/IntegrationStatus";
 import { MarketTable } from "../components/MarketTable";
+import { useAuth } from "../hooks/useAuth";
 import { useReference } from "../hooks/useReference";
-import { formatOrderLegs } from "../lib/markets";
-import { clearOrderLog, readOrderLog } from "../lib/orderLog";
-import type { LocalOrder } from "../types";
+import { ApiError, api, errorMessage } from "../lib/api";
+import { fillFraction, formatOrderLegs } from "../lib/markets";
+import type { Order, OrderStatus } from "../types";
 
-const TYPE_LABEL: Record<LocalOrder["type"], string> = {
-  limit_buy: "buy",
-  limit_sell: "sell",
-  cancel: "cancel"
+const STATUS_CLASS: Record<OrderStatus, string> = {
+  open: "tag",
+  partially_filled: "tag",
+  filled: "tag status-success",
+  cancelled: "tag status-danger"
+};
+
+const STATUS_LABEL: Record<OrderStatus, string> = {
+  open: "open",
+  partially_filled: "partial",
+  filled: "filled",
+  cancelled: "cancelled"
 };
 
 export const TradesPage: React.FC = () => {
-  const [orders, setOrders] = useState<LocalOrder[]>([]);
+  const { token, logout } = useAuth();
   const { reference } = useReference();
 
-  useEffect(() => {
-    setOrders(readOrderLog());
-  }, []);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
 
+  const loadOrders = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const res = await api.getOrders(token);
+      setOrders(res.orders ?? []);
+    } catch (err) {
+      if (err instanceof ApiError && err.isUnauthorized) {
+        logout();
+        return;
+      }
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [logout, token]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   return (
     <div className="grid" style={{ gap: 18 }}>
       <SourcedPanel
-        eyebrow="Trades"
-        title="Orders submitted from this browser"
-        kind="local"
-        endpoint="awaiting GET /orders"
+        eyebrow="Orders"
+        title="Your orders"
+        kind="live"
+        endpoint="GET /orders"
         note={
           <>
-            These are real acknowledgements from <code>POST /trades</code>, saved locally because the
-            backend has no endpoint to read orders back. <strong>Fill status is unknown</strong> — an
-            order here may have filled, rested, or been cancelled, and clearing site data erases the
-            list. Amounts are rendered from the minor units that were sent, so any entry logged
-            before this browser switched to cents and satoshis will read far too small — clear the
-            log if you see one.
+            Read from the database, newest first — not from this browser. Fill progress comes from{" "}
+            <code>filled_quantity</code>, which stays at zero until the matching engine reports
+            executions, so everything currently rests as <strong>open</strong>. That is accurate
+            rather than unknown: nothing can fill yet.
           </>
         }
         actions={
-          orders.length > 0 ? (
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setOrders(clearOrderLog())}
-            >
-              Clear log
-            </button>
-          ) : undefined
+          <button type="button" className="ghost-button" onClick={loadOrders} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
         }
       >
-        <table className="table" style={{ marginTop: 4 }}>
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Market</th>
-              <th>Side</th>
-              <th style={{ textAlign: "right" }}>Shares</th>
-              <th style={{ textAlign: "right" }}>Price</th>
-              <th>Submitted</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((order) => {
-              const legs = formatOrderLegs(reference, order);
-              return (
-                <tr key={`${order.order_id}-${order.submittedAt}`}>
-                  <td>{order.order_id}</td>
-                  <td>{order.market}</td>
-                  <td
-                    style={{
-                      color:
-                        order.type === "limit_buy"
-                          ? "var(--success)"
-                          : order.type === "limit_sell"
-                            ? "var(--danger)"
-                            : "var(--muted-text)"
-                    }}
-                  >
-                    {TYPE_LABEL[order.type]}
-                  </td>
-                  <td style={{ textAlign: "right" }}>{legs.shares}</td>
-                  <td style={{ textAlign: "right" }}>{legs.price}</td>
-                  <td className="muted">{new Date(order.submittedAt).toLocaleString()}</td>
-                </tr>
-              );
-            })}
-            {orders.length === 0 && (
+        {error && <div className="pill status-danger">{error}</div>}
+
+        {!error && (
+          <table className="table" style={{ marginTop: 4 }}>
+            <thead>
               <tr>
-                <td colSpan={6} className="muted">
-                  Nothing submitted yet. <Link to="/trades/new">Place an order →</Link>
-                </td>
+                <th>ID</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th style={{ textAlign: "right" }}>Quantity</th>
+                <th style={{ textAlign: "right" }}>Filled</th>
+                <th style={{ textAlign: "right" }}>Limit price</th>
+                <th>Status</th>
+                <th>Placed</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {orders.map((order) => {
+                const legs = formatOrderLegs(reference, order);
+                const filled = fillFraction(order);
+
+                return (
+                  <tr key={order.id}>
+                    <td>{order.id}</td>
+                    <td>{order.market}</td>
+                    <td
+                      style={{
+                        color: order.side === "buy" ? "var(--success)" : "var(--danger)"
+                      }}
+                    >
+                      {order.side}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{legs.quantity}</td>
+                    <td style={{ textAlign: "right" }} className={filled ? undefined : "muted"}>
+                      {legs.filled}
+                      <span className="muted"> ({Math.round(filled * 100)}%)</span>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{legs.price}</td>
+                    <td>
+                      <span className={STATUS_CLASS[order.status] ?? "tag"}>
+                        {STATUS_LABEL[order.status] ?? order.status}
+                      </span>
+                    </td>
+                    <td className="muted">{new Date(order.created_at).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+
+              {orders.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    No orders yet. <Link to="/trades/new">Place one →</Link>
+                  </td>
+                </tr>
+              )}
+              {loading && orders.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    Loading orders…
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </SourcedPanel>
 
       <MarketTable />

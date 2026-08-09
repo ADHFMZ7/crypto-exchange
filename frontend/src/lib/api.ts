@@ -1,4 +1,4 @@
-import type { TradeAck, TradeType, User, Wallet } from "../types";
+import type { OrderAck, OrdersResponse, Side, User, Wallet } from "../types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
@@ -106,26 +106,36 @@ export const api = {
   getWallet: (token: string) => request<Wallet>("/wallets/me", { token }),
 
   /**
-   * PATCH /wallets/me — a signed delta in USD minor units, so 500 is five
-   * dollars and a withdrawal is negative. The balances table is already
-   * denominated in cents (users.GiveBalance seeds 1_000_000 for $10,000), so
-   * cents is what keeps a deposit consistent with the balance it lands in.
+   * PATCH /wallets/me — a signed delta applied to one currency, so a withdrawal
+   * is the same call with a negative amount.
+   *
+   * `minorAmount` is that currency's minor units: cents for USD, satoshis for
+   * BTC. Which one it is depends entirely on `currency`, which is why they
+   * travel together.
    */
-  deposit: (token: string, minorAmount: number) =>
+  deposit: (token: string, currency: string, minorAmount: number) =>
     request<void>("/wallets/me", {
       method: "PATCH",
       token,
-      body: { Amount: minorAmount }
+      body: { currency, amount: minorAmount }
     }),
 
   /**
-   * POST /trades — `shares` is base minor units, `price` is quote minor units
-   * per whole base. Build the payload with toTradePayload rather than by hand.
+   * POST /orders — `quantity` is base minor units, `price` is quote minor units
+   * per whole base. Build the payload with toOrderPayload rather than by hand;
+   * it is the only place the wire format is constructed.
+   *
+   * All four fields are required. Cancellation is not part of this payload —
+   * it is a separate resource (DELETE /orders/{id}), which the backend does not
+   * serve yet.
    */
-  submitTrade: (
+  createOrder: (
     token: string,
-    payload: { market: string; type: TradeType; shares?: number; price?: number; order_id?: number }
-  ) => request<TradeAck>("/trades", { method: "POST", token, body: payload })
+    payload: { market: string; side: Side; quantity: number; price: number }
+  ) => request<OrderAck>("/orders", { method: "POST", token, body: payload }),
+
+  /** GET /orders — the caller's own orders, newest first. */
+  getOrders: (token: string) => request<OrdersResponse>("/orders", { token })
 };
 
 /** Turns any thrown value into something safe to render. */

@@ -7,11 +7,14 @@ import {
   pow10,
   toAmount
 } from "./decimal";
+import type { Side } from "../types";
 import type { Market, ReferenceData } from "./reference";
 
 export type { Currency, Market, ReferenceData } from "./reference";
 
-export type Side = "buy" | "sell";
+// Side is the wire vocabulary, so it is defined once in types and re-exported
+// here for the callers that reason about markets rather than payloads.
+export type { Side } from "../types";
 
 /**
  * The decimal places a currency holds — minor units per whole unit is 10^this.
@@ -231,7 +234,8 @@ function amountError(leg: "spend" | "receive", reason: "malformed" | "negative")
   return `Enter a valid ${leg} amount.`;
 }
 
-function minorUnitName(code: string, exponent: number): string {
+/** What one minor unit of a currency is called, for user-facing copy. */
+export function minorUnitName(code: string, exponent: number): string {
   if (exponent === 0) return `whole ${code}`;
   if (code === "USD") return "cents";
   if (code === "BTC") return "satoshis";
@@ -239,27 +243,31 @@ function minorUnitName(code: string, exponent: number): string {
 }
 
 /**
- * Builds the POST /trades body.
+ * Builds the POST /orders body.
  *
  * The market symbol is resolved here, from the currency pair the user picked —
  * they never select a ticker. This is the single place the wire format is
  * constructed.
  *
- * TODO(docs/api-todos.md § Group 1c): when the backend migrates, this becomes
- * `{ market, side, quantity: string, price: string }` — `type` collapses to
- * `side`, `shares` becomes `quantity`, and both amounts become strings so large
- * minor-unit values survive JSON. Nothing outside this function changes.
+ * All four fields are always present. `side` and order type are independent
+ * axes, which is why the old combined `limit_buy` encoding is gone: adding
+ * market or stop orders now adds values to a `type` field rather than
+ * multiplying out one.
+ *
+ * TODO(docs/api-todos.md § 1c): amounts become strings when minor-unit values
+ * outgrow the IEEE-754 safe range — satoshis fit today, an 18-decimal currency
+ * would not. Nothing outside this function changes when they do.
  */
-export function toTradePayload(intent: OrderIntent): {
+export function toOrderPayload(intent: OrderIntent): {
   market: string;
-  type: "limit_buy" | "limit_sell";
-  shares: number;
+  side: Side;
+  quantity: number;
   price: number;
 } {
   return {
     market: intent.market.symbol,
-    type: intent.side === "buy" ? "limit_buy" : "limit_sell",
-    shares: Number(intent.quantity),
+    side: intent.side,
+    quantity: Number(intent.quantity),
     price: Number(intent.price)
   };
 }
@@ -292,21 +300,33 @@ export function formatBalance(
  */
 export function formatOrderLegs(
   ref: ReferenceData,
-  order: { market: string; shares: number | null; price: number | null }
-): { shares: string; price: string } {
+  order: { market: string; quantity: number; filled_quantity?: number; price_each: number }
+): { quantity: string; filled: string; price: string } {
   const market = ref.markets.find((m) => m.symbol === order.market);
 
-  const render = (value: number | null, code: string | undefined): string => {
-    if (value === null) return "—";
-    // Order logs come from localStorage, which is untrusted input: a corrupt
-    // entry must not throw inside BigInt() and take the page down with it.
+  const render = (value: number | undefined, code: string | undefined): string => {
+    if (value === undefined) return "—";
+    // Defensive against a malformed payload: a non-integer must not throw
+    // inside BigInt() and take the page down with it.
     if (!Number.isInteger(value)) return String(value);
     if (!code) return value.toLocaleString();
     return formatAmount(ref, BigInt(value), code);
   };
 
   return {
-    shares: render(order.shares, market?.base),
-    price: render(order.price, market?.quote)
+    quantity: render(order.quantity, market?.base),
+    filled: render(order.filled_quantity, market?.base),
+    price: render(order.price_each, market?.quote)
   };
+}
+
+/**
+ * What fraction of an order has filled, 0..1.
+ *
+ * Reads 0 for everything until the matching engine reports fills — which is
+ * accurate rather than a placeholder, since nothing can fill yet.
+ */
+export function fillFraction(order: { quantity: number; filled_quantity: number }): number {
+  if (!order.quantity) return 0;
+  return Math.min(Math.max(order.filled_quantity / order.quantity, 0), 1);
 }

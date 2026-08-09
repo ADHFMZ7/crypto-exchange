@@ -12,30 +12,25 @@ import {
   formatAmount,
   formatBalance,
   resolveMarkets,
-  toTradePayload,
+  toOrderPayload,
   tradeableCurrencies
 } from "../lib/markets";
-import { appendOrder } from "../lib/orderLog";
-import type { TradeAck, WalletBalance } from "../types";
-
-type Mode = "exchange" | "cancel";
+import type { OrderAck, WalletBalance } from "../types";
 
 export const CreateTradePage: React.FC = () => {
   const { token, logout } = useAuth();
   const { reference } = useReference();
 
-  const [mode, setMode] = useState<Mode>("exchange");
   const [spendCurrency, setSpendCurrency] = useState("USD");
   const [receiveCurrency, setReceiveCurrency] = useState("BTC");
   const [spendAmount, setSpendAmount] = useState("45000");
   const [receiveAmount, setReceiveAmount] = useState("1");
 
   const [preferredSymbol, setPreferredSymbol] = useState<string | undefined>();
-  const [cancelOrderID, setCancelOrderID] = useState("");
   const [balances, setBalances] = useState<WalletBalance[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [result, setResult] = useState<TradeAck | null>(null);
+  const [result, setResult] = useState<OrderAck | null>(null);
 
   const currencies = tradeableCurrencies(reference);
 
@@ -133,44 +128,14 @@ export const CreateTradePage: React.FC = () => {
     setResult(null);
 
     try {
-      let ack: TradeAck;
-
-      if (mode === "cancel") {
-        const parsedID = Number(cancelOrderID);
-        if (!Number.isInteger(parsedID) || parsedID <= 0) {
-          setError("Cancel requests need a positive order ID.");
-          return;
-        }
-        ack = await api.submitTrade(token, {
-          market: reference.markets[0]?.symbol ?? "BTC-USD",
-          type: "cancel",
-          order_id: parsedID
-        });
-        setCancelOrderID("");
-        appendOrder({
-          order_id: ack.order_id,
-          market: ack.market,
-          type: "cancel",
-          shares: null,
-          price: null,
-          submittedAt: ack.receivedAt
-        });
-      } else {
-        if (!intent) {
-          setError(intentError?.message ?? "Fill in both amounts.");
-          return;
-        }
-        ack = await api.submitTrade(token, toTradePayload(intent));
-        appendOrder({
-          order_id: ack.order_id,
-          market: ack.market,
-          type: intent.side === "buy" ? "limit_buy" : "limit_sell",
-          shares: Number(intent.quantity),
-          price: Number(intent.price),
-          submittedAt: ack.receivedAt
-        });
+      if (!intent) {
+        setError(intentError?.message ?? "Fill in both amounts.");
+        return;
       }
 
+      // The ack is no longer the only record of the order — GET /orders reads
+      // it back from the database, so there is nothing to save client-side.
+      const ack = await api.createOrder(token, toOrderPayload(intent));
       setResult(ack);
     } catch (err) {
       setError(errorMessage(err));
@@ -190,7 +155,7 @@ export const CreateTradePage: React.FC = () => {
         eyebrow="Trade API"
         title="Exchange currency"
         kind="live"
-        endpoint="POST /trades"
+        endpoint="POST /orders"
         note={
           <>
             Describe the trade as what you give and what you get — the market and side are worked out
@@ -198,41 +163,8 @@ export const CreateTradePage: React.FC = () => {
             filled.
           </>
         }
-        actions={
-          <div className="inline-actions" style={{ gap: 6 }}>
-            <button
-              type="button"
-              className={mode === "exchange" ? undefined : "ghost-button"}
-              onClick={() => setMode("exchange")}
-            >
-              Exchange
-            </button>
-            <button
-              type="button"
-              className={mode === "cancel" ? undefined : "ghost-button"}
-              onClick={() => setMode("cancel")}
-            >
-              Cancel order
-            </button>
-          </div>
-        }
       >
         <form className="stack" style={{ gap: 14 }} onSubmit={onSubmit}>
-          {mode === "cancel" ? (
-            <label className="stack">
-              <span>Order ID to cancel</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={cancelOrderID}
-                onChange={(e) => setCancelOrderID(e.target.value)}
-                placeholder="e.g. 42"
-                required
-              />
-            </label>
-          ) : (
-            <>
               <div className="leg">
                 <div className="leg-label">
                   <span>You spend</span>
@@ -439,29 +371,22 @@ export const CreateTradePage: React.FC = () => {
                   </table>
                 </details>
               )}
-            </>
-          )}
-
           {error && <div className="pill status-danger">{error}</div>}
 
-          <button type="submit" disabled={loading || (mode === "exchange" && !intent)}>
+          <button type="submit" disabled={loading || !intent}>
             {loading
               ? "Submitting…"
-              : mode === "cancel"
-                ? "Cancel order"
-                : intent
-                  ? `Spend ${formatAmount(reference, intent.spendMinor, intent.spendCurrency)}`
-                  : "Submit request"}
+              : intent
+                ? `Spend ${formatAmount(reference, intent.spendMinor, intent.spendCurrency)}`
+                : "Submit request"}
           </button>
 
-          {mode === "exchange" && (
-            <div className="muted">
-              The balances above go stale the moment an order is accepted — the server locks funds
-              when it writes the order, so reload the wallet to see <code>locked</code> move. A{" "}
-              <strong>202</strong> is not proof that happened: it is returned before the outcome of
-              the lock is known.
-            </div>
-          )}
+          <div className="muted">
+            The balances above go stale the moment an order is accepted — the server locks funds
+            when it writes the order, so reload the wallet to see <code>locked</code> move. A{" "}
+            <strong>202</strong> is not proof that happened: it is returned before the outcome of
+            the lock is known.
+          </div>
         </form>
       </SourcedPanel>
 
@@ -472,11 +397,12 @@ export const CreateTradePage: React.FC = () => {
           eyebrow="Response"
           title="Accepted by the server"
           kind="live"
-          endpoint="POST /trades"
+          endpoint="POST /orders"
           note={
             <>
-              Saved to this browser's order log so it survives navigation.{" "}
-              <Link to="/trades">View all submissions →</Link>
+              The order is now in the database — this id is what{" "}
+              <code>GET /orders</code> reads back.{" "}
+              <Link to="/trades">View all orders →</Link>
             </>
           }
         >
@@ -488,10 +414,6 @@ export const CreateTradePage: React.FC = () => {
             <div className="card">
               <div className="muted">Market</div>
               <strong>{result.market}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Type</div>
-              <strong>{result.type}</strong>
             </div>
             <div className="card">
               <div className="muted">Status</div>
@@ -521,9 +443,8 @@ const ReferenceStatus: React.FC = () => {
         <>
           Served by the backend, so the exponents below are authoritative — the frontend keeps no
           copy of them. <strong>Every amount sent is integer minor units</strong>, cents and
-          satoshis; dollars and bitcoin exist only in the fields above. Still outstanding on the
-          server: <code>POST /trades</code> must read <code>shares</code> as satoshis and{" "}
-          <code>price</code> as cents per whole BTC. See <code>docs/api-todos.md</code> § 1c.
+          satoshis; dollars and bitcoin exist only in the fields above. The server reads them the
+          same way: <code>quantity</code> in satoshis, <code>price</code> in cents per whole BTC.
         </>
       }
     >

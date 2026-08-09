@@ -6,8 +6,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { toAmount } from "../lib/decimal";
-import { formatBalance, formatOrderLegs } from "../lib/markets";
-import { readOrderLog } from "../lib/orderLog";
+import { fillFraction, formatBalance, formatOrderLegs } from "../lib/markets";
 import {
   MOCK_CHART_SYMBOLS,
   MOCK_TICK_MS,
@@ -15,7 +14,7 @@ import {
   seedSeries,
   type PricePoint
 } from "../mocks";
-import type { LocalOrder, WalletBalance } from "../types";
+import type { Order, WalletBalance } from "../types";
 
 export const HomePage: React.FC = () => {
   const { user, token, logout } = useAuth();
@@ -25,13 +24,10 @@ export const HomePage: React.FC = () => {
   const [walletError, setWalletError] = useState<string>();
   const [walletLoading, setWalletLoading] = useState(false);
 
-  const [orders, setOrders] = useState<LocalOrder[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [series, setSeries] = useState<Record<string, PricePoint[]>>(seedSeries);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(MOCK_CHART_SYMBOLS[0]);
 
-  useEffect(() => {
-    setOrders(readOrderLog());
-  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -41,8 +37,15 @@ export const HomePage: React.FC = () => {
       setWalletLoading(true);
       setWalletError(undefined);
       try {
-        const wallet = await api.getWallet(token);
-        if (!cancelled) setBalances(wallet.balances ?? []);
+        // Both are the caller's own state and share a failure mode, so one
+        // round trip pair keeps the summary internally consistent.
+        const [wallet, orderList] = await Promise.all([
+          api.getWallet(token),
+          api.getOrders(token)
+        ]);
+        if (cancelled) return;
+        setBalances(wallet.balances ?? []);
+        setOrders(orderList.orders ?? []);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.isUnauthorized) {
@@ -197,10 +200,10 @@ export const HomePage: React.FC = () => {
 
       <SourcedPanel
         eyebrow="Activity"
-        title="Recent submissions"
-        kind="local"
-        endpoint="awaiting GET /orders"
-        note="Acknowledgements saved by this browser. Fill status is unknown until the backend can report it."
+        title="Recent orders"
+        kind="live"
+        endpoint="GET /orders"
+        note="Your five most recent orders, read from the database."
         actions={
           <Link to="/trades">
             <button type="button" className="ghost-button">
@@ -212,32 +215,43 @@ export const HomePage: React.FC = () => {
         <table className="table">
           <thead>
             <tr>
-              <th>Order ID</th>
+              <th>ID</th>
               <th>Market</th>
-              <th>Type</th>
-              <th style={{ textAlign: "right" }}>Shares</th>
-              <th style={{ textAlign: "right" }}>Price</th>
-              <th>Submitted</th>
+              <th>Side</th>
+              <th style={{ textAlign: "right" }}>Quantity</th>
+              <th style={{ textAlign: "right" }}>Filled</th>
+              <th style={{ textAlign: "right" }}>Limit price</th>
+              <th>Status</th>
+              <th>Placed</th>
             </tr>
           </thead>
           <tbody>
             {recentOrders.map((order) => {
               const legs = formatOrderLegs(reference, order);
+              const filled = fillFraction(order);
               return (
-                <tr key={`${order.order_id}-${order.submittedAt}`}>
-                  <td>{order.order_id}</td>
+                <tr key={order.id}>
+                  <td>{order.id}</td>
                   <td>{order.market}</td>
-                  <td>{order.type}</td>
-                  <td style={{ textAlign: "right" }}>{legs.shares}</td>
+                  <td style={{ color: order.side === "buy" ? "var(--success)" : "var(--danger)" }}>
+                    {order.side}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{legs.quantity}</td>
+                  <td style={{ textAlign: "right" }} className={filled ? undefined : "muted"}>
+                    {Math.round(filled * 100)}%
+                  </td>
                   <td style={{ textAlign: "right" }}>{legs.price}</td>
-                  <td className="muted">{new Date(order.submittedAt).toLocaleString()}</td>
+                  <td>
+                    <span className="tag">{order.status}</span>
+                  </td>
+                  <td className="muted">{new Date(order.created_at).toLocaleString()}</td>
                 </tr>
               );
             })}
             {recentOrders.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted">
-                  No orders submitted yet. <Link to="/trades/new">Place one →</Link>
+                <td colSpan={8} className="muted">
+                  No orders yet. <Link to="/trades/new">Place one →</Link>
                 </td>
               </tr>
             )}

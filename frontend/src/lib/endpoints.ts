@@ -49,9 +49,9 @@ export const ENDPOINTS: EndpointStatus[] = [
   },
   {
     method: "POST",
-    path: "/trades",
+    path: "/orders",
     state: "live",
-    purpose: "Queue a limit order or cancellation"
+    purpose: "Place a limit order: market, side, quantity, price"
   },
   {
     method: "GET",
@@ -68,9 +68,15 @@ export const ENDPOINTS: EndpointStatus[] = [
   {
     method: "GET",
     path: "/orders",
+    state: "live",
+    purpose: "This user's orders, with status and fill progress"
+  },
+  {
+    method: "DELETE",
+    path: "/orders/{id}",
     state: "mock",
-    purpose: "List this user's orders and their fill status",
-    workaround: "Trades page replays acks saved in this browser"
+    purpose: "Cancel a resting order",
+    workaround: "No cancel UI — the trade form only places orders"
   },
   {
     method: "GET",
