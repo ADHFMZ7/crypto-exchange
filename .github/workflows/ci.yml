@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A newer push to the same branch cancels the older run — no point burning
+# minutes verifying a commit that has already been superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go build ./...
+
+      - run: go vet ./...
+
+      # -race because the order path is concurrent by design: a worker
+      # goroutine per market reading from a channel. A data race there is the
+      # class of bug that never reproduces locally.
+      - run: go test -race ./...
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ci, not install: installs exactly what package-lock.json pins, and
+      # fails if the lockfile and package.json disagree.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - run: npm run build
