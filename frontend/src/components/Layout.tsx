@@ -10,6 +10,7 @@ type LayoutProps = {
 const links = [
   { to: "/", label: "Home", end: true },
   { to: "/wallet", label: "Wallet" },
+  { to: "/trades", label: "Trades", end: true },
   { to: "/trades/new", label: "New Trade" }
 ];
 

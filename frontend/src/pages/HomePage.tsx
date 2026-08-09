@@ -1,124 +1,156 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { SourcedPanel } from "../components/DataSource";
+import { MarketTable } from "../components/MarketTable";
 import { useAuth } from "../hooks/useAuth";
-import type { MarketTicker, Trade } from "../types";
-
-const sampleTrades: Trade[] = [
-  { id: "1", market: "BTC-USD", side: "buy", quantity: 0.1, price: 45000, status: "open", placedAt: "2024-01-01T12:00:00Z" },
-  { id: "2", market: "ETH-USD", side: "sell", quantity: 1.5, price: 3200, status: "open", placedAt: "2024-01-02T09:35:00Z" },
-  { id: "3", market: "SOL-USD", side: "buy", quantity: 50, price: 110, status: "filled", placedAt: "2024-01-03T15:12:00Z" }
-];
-
-const initialMarkets: MarketTicker[] = [
-  { symbol: "BTC-USD", price: 45210, change: 2.1, volume: 2150 },
-  { symbol: "ETH-USD", price: 3230, change: -0.8, volume: 8891 },
-  { symbol: "SOL-USD", price: 112, change: 1.6, volume: 12540 },
-  { symbol: "DOGE-USD", price: 0.088, change: 5.2, volume: 102001 }
-];
-
-type PricePoint = { t: number; price: number };
-const chartSymbols = ["BTC-USD", "ETH-USD", "SOL-USD"];
+import { useReference } from "../hooks/useReference";
+import { ApiError, api, errorMessage } from "../lib/api";
+import { toAmount } from "../lib/decimal";
+import { formatBalance, formatOrderLegs } from "../lib/markets";
+import { readOrderLog } from "../lib/orderLog";
+import {
+  MOCK_CHART_SYMBOLS,
+  MOCK_TICK_MS,
+  driftSeries,
+  seedSeries,
+  type PricePoint
+} from "../mocks";
+import type { LocalOrder, WalletBalance } from "../types";
 
 export const HomePage: React.FC = () => {
-  const { user } = useAuth();
-  const [trades] = useState<Trade[]>(sampleTrades);
-  const [markets, setMarkets] = useState<MarketTicker[]>(initialMarkets);
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(chartSymbols[0]);
-  const [series, setSeries] = useState<Record<string, PricePoint[]>>(() => {
-    const now = Date.now();
-    const start = (price: number) =>
-      Array.from({ length: 12 }, (_, i) => ({
-        t: now - (11 - i) * 60_000,
-        price: Number((price * (1 + (Math.random() - 0.5) * 0.01)).toFixed(2))
-      }));
-    return {
-      "BTC-USD": start(45000),
-      "ETH-USD": start(3200),
-      "SOL-USD": start(110)
-    };
-  });
+  const { user, token, logout } = useAuth();
+  const { reference } = useReference();
 
-  const openTrades = useMemo(() => trades.filter((t) => t.status === "open"), [trades]);
-  const netOpenExposure = useMemo(
-    () =>
-      openTrades.reduce((sum, trade) => {
-        const value = trade.price * trade.quantity;
-        return sum + (trade.side === "buy" ? value : -value);
-      }, 0),
-    [openTrades]
-  );
+  const [balances, setBalances] = useState<WalletBalance[]>([]);
+  const [walletError, setWalletError] = useState<string>();
+  const [walletLoading, setWalletLoading] = useState(false);
+
+  const [orders, setOrders] = useState<LocalOrder[]>([]);
+  const [series, setSeries] = useState<Record<string, PricePoint[]>>(seedSeries);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(MOCK_CHART_SYMBOLS[0]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      // update ticker cards
-      setMarkets((prev) =>
-        prev.map((m) => {
-          const drift = (Math.random() - 0.5) * (m.price * 0.0015);
-          const nextPrice = Math.max(m.price + drift, 0.0001);
-          const nextChange = ((nextPrice - m.price) / m.price) * 100 + m.change;
-          return { ...m, price: Number(nextPrice.toFixed(2)), change: Number(nextChange.toFixed(2)) };
-        })
-      );
+    setOrders(readOrderLog());
+  }, []);
 
-      // append a price point to each chart symbol to simulate executed trades
-      setSeries((prev) => {
-        const next: typeof prev = {};
-        Object.entries(prev).forEach(([symbol, points]) => {
-          const last = points[points.length - 1];
-          const drift = (Math.random() - 0.5) * (last.price * 0.002);
-          const price = Math.max(last.price + drift, 0.0001);
-          const updated = [...points.slice(-30), { t: Date.now(), price: Number(price.toFixed(2)) }];
-          next[symbol] = updated;
-        });
-        return next;
-      });
-    }, 2500);
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    (async () => {
+      setWalletLoading(true);
+      setWalletError(undefined);
+      try {
+        const wallet = await api.getWallet(token);
+        if (!cancelled) setBalances(wallet.balances ?? []);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.isUnauthorized) {
+          logout();
+          return;
+        }
+        setWalletError(errorMessage(err));
+      } finally {
+        if (!cancelled) setWalletLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [logout, token]);
+
+  useEffect(() => {
+    const id = setInterval(() => setSeries(driftSeries), MOCK_TICK_MS);
     return () => clearInterval(id);
   }, []);
 
   const currentSeries = series[selectedSymbol] ?? [];
-  const chartMetrics = useMemo(() => {
-    if (!currentSeries.length) return { min: 0, max: 0, path: "" };
-    const min = Math.min(...currentSeries.map((p) => p.price));
-    const max = Math.max(...currentSeries.map((p) => p.price));
+  const chart = useMemo(() => {
+    if (!currentSeries.length) return { min: 0, max: 0, path: "", last: undefined };
+
+    const prices = currentSeries.map((p) => p.price);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
     const padding = (max - min || max || 1) * 0.1;
     const low = min - padding;
     const high = max + padding;
-    const xSpan = Math.max(...currentSeries.map((p) => p.t)) - Math.min(...currentSeries.map((p) => p.t)) || 1;
-    const mapPoint = (p: PricePoint) => {
-      const x = ((p.t - currentSeries[0].t) / xSpan) * 100;
-      const y = 100 - ((p.price - low) / (high - low)) * 100;
-      return { x, y };
-    };
-    const coords = currentSeries.map(mapPoint);
-    const path = coords.map((c, i) => `${i === 0 ? "M" : "L"}${c.x},${c.y}`).join(" ");
+    const times = currentSeries.map((p) => p.t);
+    const xSpan = Math.max(...times) - Math.min(...times) || 1;
+
+    const path = currentSeries
+      .map((p, i) => {
+        const x = ((p.t - currentSeries[0].t) / xSpan) * 100;
+        const y = 100 - ((p.price - low) / (high - low)) * 100;
+        return `${i === 0 ? "M" : "L"}${x},${y}`;
+      })
+      .join(" ");
+
     return { min, max, path, last: currentSeries[currentSeries.length - 1] };
   }, [currentSeries]);
 
+  const recentOrders = orders.slice(0, 5);
+
   return (
     <div className="grid" style={{ gap: 18 }}>
-      <div className="panel">
-        <div className="headline">
-          <div>
-            <div className="tag">Market moves</div>
-            <h2 style={{ margin: "4px 0" }}>{selectedSymbol}</h2>
-            <div className="muted">Simulated executed trades over time — price in USD on the Y axis.</div>
-          </div>
-          <div className="inline-actions">
-            <div className="pill">
-              <div className="muted">Latest</div>
-              <strong>{chartMetrics.last?.price ?? "-"} USD</strong>
-            </div>
-            <div className="pill">
-              <div className="muted">Range</div>
-              <strong>
-                {chartMetrics.min.toLocaleString(undefined, { maximumFractionDigits: 2 })} –{" "}
-                {chartMetrics.max.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
-              </strong>
-            </div>
-          </div>
+      <SourcedPanel
+        eyebrow="Account"
+        title={user ? `Hello, ${user.fullname}` : "Welcome"}
+        kind="live"
+        endpoint="GET /users/me, GET /wallets/me"
+        note="Identity and balances read from the database."
+        actions={
+          <>
+            <Link to="/wallet">
+              <button type="button" className="ghost-button">
+                Wallet
+              </button>
+            </Link>
+            <Link to="/trades/new">
+              <button type="button">New Trade</button>
+            </Link>
+          </>
+        }
+      >
+        <div className="muted" style={{ marginBottom: 12 }}>
+          {user?.email}
         </div>
 
+        {walletError && <div className="pill status-danger">{walletError}</div>}
+
+        <div className="inline-actions" style={{ gap: 12 }}>
+          {balances.map((balance) => (
+            <div className="card" key={balance.id}>
+              <div className="muted">{balance.currency} available</div>
+              <strong style={{ fontSize: 20 }}>
+                {formatBalance(reference, balance.available, balance.currency)}
+              </strong>
+              {toAmount(balance.locked) > 0n && (
+                <div className="muted">
+                  {formatBalance(reference, balance.locked, balance.currency)} locked
+                </div>
+              )}
+            </div>
+          ))}
+          {balances.length === 0 && (
+            <div className="muted">{walletLoading ? "Loading balances…" : "No balances yet."}</div>
+          )}
+        </div>
+      </SourcedPanel>
+
+      <SourcedPanel
+        eyebrow="Market moves"
+        title={selectedSymbol}
+        kind="mock"
+        endpoint="awaiting GET /markets/{symbol}/candles"
+        note="A synthetic random walk, not price history. Nothing here reflects real or executed trades."
+        actions={
+          <div className="pill">
+            <span className="muted">Latest </span>
+            <strong>{chart.last?.price.toLocaleString() ?? "—"} USD</strong>
+          </div>
+        }
+      >
         <div style={{ width: "100%", height: 260, position: "relative" }}>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
             <defs>
@@ -127,16 +159,11 @@ export const HomePage: React.FC = () => {
                 <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
               </linearGradient>
             </defs>
-            {chartMetrics.path && (
+            {chart.path && (
               <>
+                <path d={`${chart.path} L100,100 L0,100 Z`} fill="url(#areaFill)" stroke="none" />
                 <path
-                  d={`${chartMetrics.path} L100,100 L0,100 Z`}
-                  fill="url(#areaFill)"
-                  stroke="none"
-                  vectorEffect="non-scaling-stroke"
-                />
-                <path
-                  d={chartMetrics.path}
+                  d={chart.path}
                   fill="none"
                   stroke="var(--accent)"
                   strokeWidth={1.5}
@@ -147,9 +174,13 @@ export const HomePage: React.FC = () => {
           </svg>
           <div style={{ position: "absolute", bottom: 8, right: 12 }}>
             <label className="inline-actions" style={{ gap: 8, alignItems: "center" }}>
-              <span className="muted">Currency</span>
-              <select value={selectedSymbol} onChange={(e) => setSelectedSymbol(e.target.value)} style={{ width: 140 }}>
-                {chartSymbols.map((s) => (
+              <span className="muted">Symbol</span>
+              <select
+                value={selectedSymbol}
+                onChange={(e) => setSelectedSymbol(e.target.value)}
+                style={{ width: 140 }}
+              >
+                {MOCK_CHART_SYMBOLS.map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -158,95 +189,63 @@ export const HomePage: React.FC = () => {
             </label>
           </div>
         </div>
-      </div>
-
-      <div className="panel">
-        <div className="headline">
-          <div>
-            <div className="tag">Account</div>
-            <h2 style={{ margin: "4px 0" }}>{user ? `Hello, ${user.fullname}` : "Welcome"}</h2>
-            <div className="muted">{user?.email}</div>
-          </div>
-          <div className="inline-actions">
-            <Link to="/wallet">
-              <button type="button" className="ghost-button">
-                Wallet
-              </button>
-            </Link>
-            <Link to="/trades/new">
-              <button type="button">New Trade</button>
-            </Link>
-          </div>
+        <div className="muted" style={{ marginTop: 8 }}>
+          Range {chart.min.toLocaleString(undefined, { maximumFractionDigits: 2 })} –{" "}
+          {chart.max.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
         </div>
-        <p className="muted">
-          Market snapshot and active trades. Data is mocked until backend endpoints exist.
-        </p>
-      </div>
+      </SourcedPanel>
 
-      <div className="panel">
-        <div className="headline">
-          <h3 style={{ margin: 0 }}>Open trades</h3>
-          <div className="pill">Net exposure: {netOpenExposure.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD</div>
-        </div>
+      <SourcedPanel
+        eyebrow="Activity"
+        title="Recent submissions"
+        kind="local"
+        endpoint="awaiting GET /orders"
+        note="Acknowledgements saved by this browser. Fill status is unknown until the backend can report it."
+        actions={
+          <Link to="/trades">
+            <button type="button" className="ghost-button">
+              View all
+            </button>
+          </Link>
+        }
+      >
         <table className="table">
           <thead>
             <tr>
+              <th>Order ID</th>
               <th>Market</th>
-              <th>Side</th>
-              <th>Quantity</th>
-              <th>Price</th>
-              <th>Placed</th>
+              <th>Type</th>
+              <th style={{ textAlign: "right" }}>Shares</th>
+              <th style={{ textAlign: "right" }}>Price</th>
+              <th>Submitted</th>
             </tr>
           </thead>
           <tbody>
-            {openTrades.map((trade) => (
-              <tr key={trade.id}>
-                <td>{trade.market}</td>
-                <td style={{ color: trade.side === "buy" ? "var(--success)" : "var(--danger)" }}>{trade.side}</td>
-                <td>{trade.quantity}</td>
-                <td>{trade.price}</td>
-                <td>{new Date(trade.placedAt).toLocaleString()}</td>
-              </tr>
-            ))}
-            {openTrades.length === 0 && (
+            {recentOrders.map((order) => {
+              const legs = formatOrderLegs(reference, order);
+              return (
+                <tr key={`${order.order_id}-${order.submittedAt}`}>
+                  <td>{order.order_id}</td>
+                  <td>{order.market}</td>
+                  <td>{order.type}</td>
+                  <td style={{ textAlign: "right" }}>{legs.shares}</td>
+                  <td style={{ textAlign: "right" }}>{legs.price}</td>
+                  <td className="muted">{new Date(order.submittedAt).toLocaleString()}</td>
+                </tr>
+              );
+            })}
+            {recentOrders.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">
-                  No open trades. Place a new order to see it here.
+                <td colSpan={6} className="muted">
+                  No orders submitted yet. <Link to="/trades/new">Place one →</Link>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-      </div>
+      </SourcedPanel>
 
-      <div className="panel">
-        <div className="headline">
-          <h3 style={{ margin: 0 }}>Markets (live mock)</h3>
-        </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Price</th>
-              <th>Change</th>
-              <th>Volume</th>
-            </tr>
-          </thead>
-          <tbody>
-            {markets.map((m) => (
-              <tr key={m.symbol}>
-                <td>{m.symbol}</td>
-                <td>{m.price}</td>
-                <td style={{ color: m.change >= 0 ? "var(--success)" : "var(--danger)" }}>
-                  {m.change >= 0 ? "+" : ""}
-                  {m.change}%
-                </td>
-                <td>{m.volume.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <MarketTable />
     </div>
   );
 };
