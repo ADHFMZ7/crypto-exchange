@@ -24,9 +24,14 @@ services:
         condition: service_healthy
     volumes:
       - ./sql/migrations:/migrations
+    # Built from POSTGRES_* rather than DATABASE_URL: inside the compose network
+    # the host must be the `db` service, whereas DATABASE_URL in .env points at
+    # localhost for host-side use (psql, `go run ./cmd/main.go`).
+    # sslmode=disable is required — golang-migrate uses lib/pq, which demands SSL
+    # by default, and the postgres:16 image serves plaintext.
     command: >
       -path=/migrations
-      -database=${DATABASE_URL}
+      -database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
       up
     restart: "no"
 
@@ -37,8 +42,11 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      SERVER_HOST: ${SERVER_HOST}
+      # Same container-internal URL as migrate. `postgres://` is the one scheme
+      # both golang-migrate and pgxpool.ParseConfig accept — pgx5:// breaks pgx.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      # Must be 0.0.0.0, not localhost, or the published port is unreachable.
+      SERVER_HOST: 0.0.0.0
       SERVER_PORT: ${SERVER_PORT}
     ports:
       - "8080:8080"
