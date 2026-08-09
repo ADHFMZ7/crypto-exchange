@@ -49,6 +49,5 @@ func (service *WalletService) DepositToWallet(ctx context.Context, userID int64,
 		return errors.New("Transaction makes balance invalid")
 	}
 
-	return service.WalletStore.ModfyBalance(ctx, userID, newBalance)
+	return service.WalletStore.ModifyBalance(ctx, userID, newBalance)
 }
-
