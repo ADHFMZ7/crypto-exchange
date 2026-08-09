@@ -34,3 +34,5 @@ go.work.sum
 
 # macOS
 .DS_Store
+docs/api-todos.md
+docs/design/markets-and-currencies.md
