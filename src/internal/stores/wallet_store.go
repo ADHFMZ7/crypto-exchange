@@ -17,8 +17,14 @@ func (store *WalletStore) GetByUserID(ctx context.Context, userID int64) (*model
 	var wallet models.Wallet
 	wallet.UserID = userID
 
+	// `locked` is selected as well as `available`: without it the column reads
+	// zero for every currency, which makes an order that locked funds look like
+	// it did nothing.
 	rows, err := store.pool.Query(ctx,
-		`SELECT id, user_id, currency, available FROM balances WHERE user_id = $1`,
+		`SELECT id, user_id, currency, available, locked
+		 FROM balances
+		 WHERE user_id = $1
+		 ORDER BY currency`,
 		userID,
 	)
 	if err != nil {
@@ -28,7 +34,7 @@ func (store *WalletStore) GetByUserID(ctx context.Context, userID int64) (*model
 
 	for rows.Next() {
 		var balance models.Balance
-		err := rows.Scan(&balance.ID, &balance.UserID, &balance.Currency, &balance.Available)
+		err := rows.Scan(&balance.ID, &balance.UserID, &balance.Currency, &balance.Available, &balance.Locked)
 		if err != nil {
 			return nil, err
 		}
@@ -54,11 +60,62 @@ func (store *WalletStore) GetUserBalance(ctx context.Context, userID int64, curr
 	return balance, nil
 }
 
-func (store *WalletStore) ModifyBalance(ctx context.Context, userID, newBalance int64) error {
+// ErrInsufficientFunds is returned when an adjustment would drive a balance
+// below zero.
+var ErrInsufficientFunds = errors.New("insufficient funds")
 
-	_, err := store.pool.Exec(ctx,
-		`UPDATE balances SET balance = $1 WHERE user_id = $2`,
-		newBalance, userID)
+// AdjustBalance applies a signed delta to one currency's available balance.
+//
+// It is a delta rather than a new absolute value on purpose: reading a balance
+// and writing back read+delta is a lost-update race, where two concurrent
+// deposits both read the old value and one silently overwrites the other. Doing
+// the arithmetic in the statement makes that unrepresentable.
+//
+// The upsert covers crediting a currency the user has never held — only USD is
+// seeded at signup, so a first BTC deposit has no row to update. It relies on
+// the (user_id, currency) unique constraint from migration 000004 as its
+// conflict target.
+//
+// The WHERE on the update is the overdraft guard, and it is in the same
+// statement as the debit so a withdrawal cannot pass a check and then be
+// applied against a balance that moved underneath it.
+func (store *WalletStore) AdjustBalance(ctx context.Context, userID int64, currency string, delta int64) error {
+
+	// Update first. This cannot be folded into the insert below as a single
+	// upsert: a withdrawal's proposed insert row carries a negative available,
+	// which trips the balances_non_negative CHECK before Postgres reaches the
+	// ON CONFLICT path, so every withdrawal would fail as a constraint error.
+	tag, err := store.pool.Exec(ctx, `
+		UPDATE balances
+		SET available  = available + $3,
+		    updated_at = now()
+		WHERE user_id = $1
+		  AND currency = $2
+		  AND available + $3 >= 0
+	`, userID, currency, delta)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+
+	// Nothing updated: either no such balance, or the guard rejected it. A
+	// withdrawal has nothing to draw on in both cases.
+	if delta < 0 {
+		return ErrInsufficientFunds
+	}
+
+	// A credit in a currency the user has never held creates the row — only USD
+	// is seeded at signup, so a first BTC deposit lands here. ON CONFLICT covers
+	// the race where a concurrent deposit created the row in between.
+	_, err = store.pool.Exec(ctx, `
+		INSERT INTO balances (user_id, currency, available)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, currency) DO UPDATE
+		SET available  = balances.available + $3,
+		    updated_at = now()
+	`, userID, currency, delta)
 
 	return err
 }

@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
@@ -11,12 +13,16 @@ import (
 type WalletService struct {
 	WalletStore *stores.WalletStore
 	UserStore   *stores.UserStore
+
+	// Registry is what makes a deposit currency checkable rather than trusted.
+	Registry *market.Registry
 }
 
-func NewWalletService(walletStore *stores.WalletStore, userStore *stores.UserStore) *WalletService {
+func NewWalletService(walletStore *stores.WalletStore, userStore *stores.UserStore, registry *market.Registry) *WalletService {
 	return &WalletService{
 		WalletStore: walletStore,
 		UserStore:   userStore,
+		Registry:    registry,
 	}
 }
 
@@ -36,18 +42,24 @@ func (service *WalletService) GetWalletByUserID(ctx context.Context, userID int6
 	return wallet, nil
 }
 
-func (service *WalletService) DepositToWallet(ctx context.Context, userID int64, amount int64) error {
+// ErrUnknownCurrency is returned for a currency the exchange does not list.
+var ErrUnknownCurrency = errors.New("unknown currency")
 
-	usdBalance, err := service.WalletStore.GetUserBalance(ctx, userID, "USD")
-	if err != nil {
-		return err
+// DepositToWallet applies a signed delta to one of the user's balances — a
+// withdrawal is the same call with a negative amount.
+//
+// The currency is validated against the registry rather than taken on trust:
+// without that, a typo creates a balance row in a currency nothing can trade,
+// and the unique constraint then makes it permanent.
+func (service *WalletService) DepositToWallet(ctx context.Context, userID int64, currency string, amount int64) error {
+
+	if _, ok := service.Registry.Currency(currency); !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownCurrency, currency)
 	}
 
-	newBalance := usdBalance + amount
-
-	if newBalance < 0 {
-		return errors.New("Transaction makes balance invalid")
+	if amount == 0 {
+		return errors.New("amount must be non-zero")
 	}
 
-	return service.WalletStore.ModifyBalance(ctx, userID, newBalance)
+	return service.WalletStore.AdjustBalance(ctx, userID, currency, amount)
 }

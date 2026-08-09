@@ -25,9 +25,12 @@ type UserAuth struct {
 	Password string
 }
 
+// BalanceChange is the PATCH /wallets/me body: a signed delta applied to one
+// currency. Amount is that currency's minor units — cents for USD, satoshis for
+// BTC — so the deposit and the balance it lands in are denominated alike.
 type BalanceChange struct {
-	// UserID int64
-	Amount int64
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount"`
 }
 
 type Balance struct {
