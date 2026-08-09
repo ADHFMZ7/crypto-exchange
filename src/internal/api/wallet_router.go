@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
 
 type WalletRouter struct {
@@ -59,11 +61,7 @@ func (router *WalletRouter) GetWalletSelf(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err = json.NewEncoder(w).Encode(wallet)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(w, http.StatusOK, wallet)
 }
 
 // TODO: We should probably do this as a transaction later
@@ -89,9 +87,22 @@ func (router *WalletRouter) DepositToWallet(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err = router.Services.Wallets.DepositToWallet(ctx, userID, wallet.Amount)
+	if wallet.Currency == "" {
+		http.Error(w, "currency is required", http.StatusBadRequest)
+		return
+	}
+
+	err = router.Services.Wallets.DepositToWallet(ctx, userID, wallet.Currency, wallet.Amount)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, services.ErrUnknownCurrency):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, stores.ErrInsufficientFunds):
+			// The request is well formed; the account just cannot cover it.
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		default:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 

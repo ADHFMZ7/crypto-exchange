@@ -1,145 +1,149 @@
-import React, { useEffect, useMemo, useState } from "react";
-import type { MarketTicker, Trade } from "../types";
+import React, { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { SourcedPanel } from "../components/DataSource";
+import { IntegrationStatus } from "../components/IntegrationStatus";
+import { MarketTable } from "../components/MarketTable";
+import { useAuth } from "../hooks/useAuth";
+import { useReference } from "../hooks/useReference";
+import { ApiError, api, errorMessage } from "../lib/api";
+import { fillFraction, formatOrderLegs } from "../lib/markets";
+import type { Order, OrderStatus } from "../types";
 
-const initialTrades: Trade[] = [
-  { id: "1", market: "BTC-USD", side: "buy", quantity: 0.1, price: 45000, status: "open", placedAt: "2024-01-01T12:00:00Z" },
-  { id: "2", market: "ETH-USD", side: "sell", quantity: 1.5, price: 3200, status: "filled", placedAt: "2024-01-02T09:35:00Z" },
-  { id: "3", market: "SOL-USD", side: "buy", quantity: 50, price: 110, status: "cancelled", placedAt: "2024-01-03T15:12:00Z" }
-];
-
-const initialMarkets: MarketTicker[] = [
-  { symbol: "BTC-USD", price: 45210, change: 2.1, volume: 2150 },
-  { symbol: "ETH-USD", price: 3230, change: -0.8, volume: 8891 },
-  { symbol: "SOL-USD", price: 112, change: 1.6, volume: 12540 },
-  { symbol: "DOGE-USD", price: 0.088, change: 5.2, volume: 102001 }
-];
-
-const statusClass: Record<Trade["status"], string> = {
+const STATUS_CLASS: Record<OrderStatus, string> = {
   open: "tag",
+  partially_filled: "tag",
   filled: "tag status-success",
-  cancelled: "tag status-danger",
-  settled: "tag status-success"
+  cancelled: "tag status-danger"
+};
+
+const STATUS_LABEL: Record<OrderStatus, string> = {
+  open: "open",
+  partially_filled: "partial",
+  filled: "filled",
+  cancelled: "cancelled"
 };
 
 export const TradesPage: React.FC = () => {
-  const [trades, setTrades] = useState<Trade[]>(initialTrades);
-  const [markets, setMarkets] = useState<MarketTicker[]>(initialMarkets);
+  const { token, logout } = useAuth();
+  const { reference } = useReference();
+
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const loadOrders = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const res = await api.getOrders(token);
+      setOrders(res.orders ?? []);
+    } catch (err) {
+      if (err instanceof ApiError && err.isUnauthorized) {
+        logout();
+        return;
+      }
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [logout, token]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setMarkets((prev) =>
-        prev.map((m) => {
-          const drift = (Math.random() - 0.5) * (m.price * 0.0015);
-          const nextPrice = Math.max(m.price + drift, 0.0001);
-          const nextChange = ((nextPrice - m.price) / m.price) * 100 + m.change;
-          return { ...m, price: Number(nextPrice.toFixed(2)), change: Number(nextChange.toFixed(2)) };
-        })
-      );
-    }, 2500);
-    return () => clearInterval(id);
-  }, []);
-
-  const totalExposure = useMemo(
-    () =>
-      trades.reduce((sum, trade) => {
-        const value = trade.price * trade.quantity;
-        return sum + (trade.side === "buy" ? value : -value);
-      }, 0),
-    [trades]
-  );
-
-  const onClearLocalTrades = () => setTrades([]);
+    loadOrders();
+  }, [loadOrders]);
 
   return (
     <div className="grid" style={{ gap: 18 }}>
-      <div className="panel">
-        <div className="headline">
-          <div>
-            <div className="tag">Trades</div>
-            <h2 style={{ margin: "4px 0" }}>Activity</h2>
-            <div className="muted">Static sample data. Connect to the backend once orders are available.</div>
-          </div>
-          <button type="button" onClick={onClearLocalTrades} style={{ background: "rgba(255,255,255,0.08)", color: "var(--text)" }}>
-            Clear local list
+      <SourcedPanel
+        eyebrow="Orders"
+        title="Your orders"
+        kind="live"
+        endpoint="GET /orders"
+        note={
+          <>
+            Read from the database, newest first — not from this browser. Fill progress comes from{" "}
+            <code>filled_quantity</code>, which stays at zero until the matching engine reports
+            executions, so everything currently rests as <strong>open</strong>. That is accurate
+            rather than unknown: nothing can fill yet.
+          </>
+        }
+        actions={
+          <button type="button" className="ghost-button" onClick={loadOrders} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
           </button>
-        </div>
+        }
+      >
+        {error && <div className="pill status-danger">{error}</div>}
 
-        <div className="pill">Net exposure (demo): {totalExposure.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD</div>
-
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Market</th>
-              <th>Side</th>
-              <th>Quantity</th>
-              <th>Price</th>
-              <th>Status</th>
-              <th>Placed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trades.map((trade) => (
-              <tr key={trade.id}>
-                <td>{trade.market}</td>
-                <td style={{ color: trade.side === "buy" ? "var(--success)" : "var(--danger)" }}>{trade.side}</td>
-                <td>{trade.quantity}</td>
-                <td>{trade.price}</td>
-                <td>
-                  <span className={statusClass[trade.status]}>{trade.status}</span>
-                </td>
-                <td>{new Date(trade.placedAt).toLocaleString()}</td>
-              </tr>
-            ))}
-            {trades.length === 0 && (
+        {!error && (
+          <table className="table" style={{ marginTop: 4 }}>
+            <thead>
               <tr>
-                <td colSpan={6} className="muted">
-                  No trades yet. Use the New Trade page to simulate an order.
-                </td>
+                <th>ID</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th style={{ textAlign: "right" }}>Quantity</th>
+                <th style={{ textAlign: "right" }}>Filled</th>
+                <th style={{ textAlign: "right" }}>Limit price</th>
+                <th>Status</th>
+                <th>Placed</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {orders.map((order) => {
+                const legs = formatOrderLegs(reference, order);
+                const filled = fillFraction(order);
 
-      <div className="panel">
-        <div className="headline">
-          <div>
-            <div className="tag">Markets</div>
-            <h3 style={{ margin: 0 }}>Live mock data</h3>
-          </div>
-          <button
-            type="button"
-            onClick={() => setMarkets(initialMarkets)}
-            style={{ background: "rgba(255,255,255,0.08)", color: "var(--text)" }}
-          >
-            Reset
-          </button>
-        </div>
+                return (
+                  <tr key={order.id}>
+                    <td>{order.id}</td>
+                    <td>{order.market}</td>
+                    <td
+                      style={{
+                        color: order.side === "buy" ? "var(--success)" : "var(--danger)"
+                      }}
+                    >
+                      {order.side}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{legs.quantity}</td>
+                    <td style={{ textAlign: "right" }} className={filled ? undefined : "muted"}>
+                      {legs.filled}
+                      <span className="muted"> ({Math.round(filled * 100)}%)</span>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{legs.price}</td>
+                    <td>
+                      <span className={STATUS_CLASS[order.status] ?? "tag"}>
+                        {STATUS_LABEL[order.status] ?? order.status}
+                      </span>
+                    </td>
+                    <td className="muted">{new Date(order.created_at).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
 
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Price</th>
-              <th>Change</th>
-              <th>Volume</th>
-            </tr>
-          </thead>
-          <tbody>
-            {markets.map((m) => (
-              <tr key={m.symbol}>
-                <td>{m.symbol}</td>
-                <td>{m.price}</td>
-                <td style={{ color: m.change >= 0 ? "var(--success)" : "var(--danger)" }}>
-                  {m.change >= 0 ? "+" : ""}
-                  {m.change}%
-                </td>
-                <td>{m.volume.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              {orders.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    No orders yet. <Link to="/trades/new">Place one →</Link>
+                  </td>
+                </tr>
+              )}
+              {loading && orders.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="muted">
+                    Loading orders…
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </SourcedPanel>
+
+      <MarketTable />
+
+      <IntegrationStatus />
     </div>
   );
 };

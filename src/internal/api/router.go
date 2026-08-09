@@ -15,7 +15,9 @@ func NewRouter(services *services.Services) *http.ServeMux {
 	NewUserRouter(services).Register(mux)
 	NewAuthRouter(services).Register(mux)
 	NewWalletRouter(services).Register(mux)
-	NewTradeRouter(services).Register(mux)
+	// NewTradeRouter(services).Register(mux)
+	NewReferenceRouter(services).Register(mux)
+	NewOrderRouter(services).Register(mux)
 
 	return mux
 }

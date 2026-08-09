@@ -1,135 +1,102 @@
 package services
 
-import (
-	"context"
-	"sync/atomic"
+// import (
+// 	"context"
+// 	"sync/atomic"
 
-	"github.com/ADHFMZ7/crypto-exchange/internal/models"
-	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
-	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
-)
+// 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
+// 	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
+// 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+// )
 
-type TradeService struct {
-	WalletStore *stores.WalletStore
-	UserStore   *stores.UserStore
+// type TradeService struct {
+// 	WalletStore *stores.WalletStore
+// 	UserStore   *stores.UserStore
 
-	Orderbook *orderbook.Orderbook
+// 	MarketRegistry *market.Registry
 
-	RQueues map[string]chan Request
+// 	Orderbook *orderbook.Orderbook
 
-	nextOrderID atomic.Int64
-}
+// 	RQueues map[string]chan Request
 
-func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore) *TradeService {
+// 	nextOrderID atomic.Int64
+// }
 
-	symbols := []string{"BTC-USD"}
-	channels := map[string]chan Request{}
+// func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, registry *market.Registry) *TradeService {
 
-	service := &TradeService{
-		WalletStore: walletStore,
-		UserStore:   userStore,
-		Orderbook:   orderbook.NewOrderbook(),
+// 	symbols := []string{"BTC-USD"}
 
-		RQueues: channels,
-	}
+// 	service := &TradeService{
+// 		WalletStore: walletStore,
+// 		UserStore:   userStore,
 
-	for _, symbol := range symbols {
-		channels[symbol] = make(chan Request, 1024)
-		go service.StartWorker(channels[symbol])
-	}
+// 		MarketRegistry: registry,
 
-	return service
-}
+// 		Orderbook: orderbook.NewOrderbook(),
 
-func (service *TradeService) StartWorker(channel chan Request) {
+// 	}
 
-	for request := range channel {
+// 	return service
+// }
 
-		id := orderbook.OrderID(request.OrderID)
+// func (service *TradeService) LimitSell(
+// 	ctx context.Context,
+// 	userid int64,
+// 	market market.Market,
+// 	volume int64,
+// 	limit int64,
+// ) {
+// 	// User with id userid is making a request to sell volume units of c1 at price limit for each unit of c2
 
-		if request.Type == Cancel {
-			service.Orderbook.Cancel(id)
-			continue
-		}
+// 	currency := market.Base
 
-		shares := orderbook.Shares(request.Shares)
-		price := orderbook.Price(request.Price)
+// 	order_id, err := service.WalletStore.PlaceOrder(ctx, userid, currency.Code, volume, limit, "sell", market.Symbol)
+// 	// If these funds exist, lock them and return true. After this point, funds are already validated
 
-		switch request.Type {
-		case LimitBuy:
-			service.Orderbook.LimitBuy(id, shares, price)
-		case LimitSell:
-			service.Orderbook.LimitSell(id, shares, price)
-		}
+// 	if err != nil {
+// 		println("ERROR: LimitSell Failed!")
+// 		return
+// 	}
 
-	}
+// 	// We can now safely add to the correct order queue
+// 	req := Request{
+// 		Type:    LimitSell,
+// 		OrderID: order_id,
+// 		Price:   limit,
+// 		Shares:  volume,
+// 	}
 
-}
+// 	service.RQueues[market.Symbol] <- req
+// 	// Consumed by orderbook worker
 
-func (service *TradeService) LimitSell(
-	ctx context.Context,
-	userid int64, 
-	sell_currency, buy_currency string,
-	volume int64,
-	limit int64, 
-	) {
-	// User with id userid is making a request to sell volume units of c1 at price limit for each unit of c2
+// 	// TODO: Maybe add more error checking later?
 
-	market := GetMarketSymbol(sell_currency, buy_currency)
+// }
 
-	id, err := service.WalletStore.PlaceOrder(ctx, userid, sell_currency, volume, limit, "sell", market)
-	// If these funds exist, lock them and return true. After this point, funds are already validated
+// func (service *TradeService) LimitBuy(
+// 	ctx context.Context,
+// 	userid int64,
+// 	market market.Market,
+// 	volume int64,
+// 	limit int64,
+// ) {
 
-	if err != nil {
-		return
-	}
+// 	currency := market.Quote
 
-	// We can now safely add to the correct order queue
-	req := Request{
-		Type: LimitSell,
-		OrderID: id,
-		Price: limit,
-		Shares: volume,
-	}
+// 	order_id, err := service.WalletStore.PlaceOrder(ctx, userid, currency.Code, volume, limit, "buy", market.Symbol)
 
-	service.RQueues[market] <- req
+// 	if err != nil {
+// 		println("ERROR: LimitBuy Failed!")
+// 		return
+// 	}
 
-	// now consume the result somehow
+// 	req := Request{
+// 		Type:    LimitBuy,
+// 		OrderID: order_id,
+// 		Price:   limit,
+// 		Shares:  volume,
+// 	}
 
+// 	service.RQueues[market.Symbol] <- req
 
-}
-
-func (service *TradeService) LimitBuy(
-	userid int64,
-	c1, c2 models.Currency,
-	volume int64,
-	limit int64,
-) {
-}
-
-
-func (service *TradeService) NextOrderID() int64 {
-	return service.nextOrderID.Add(1)
-}
-
-func GetMarketSymbol(c1, c2 string) string {
-    if c1 < c2 {
-        return c1 + "-" + c2
-    }
-    return c2 + "-" + c1
-}
-
-type RequestType int
-
-const (
-	LimitBuy RequestType = iota
-	LimitSell
-	Cancel
-)
-
-type Request struct {
-	Type    RequestType
-	OrderID int64
-	Price   int64
-	Shares  int64
-}
+// }

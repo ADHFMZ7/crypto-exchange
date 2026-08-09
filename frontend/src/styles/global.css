@@ -10,6 +10,7 @@
   --button-text: #06111d;
   --success: #33c27f;
   --danger: #ef6a6a;
+  --warning: #e0a33e;
 }
 
 :root[data-theme="light"] {
@@ -24,6 +25,7 @@
   --button-text: #f6f8fb;
   --success: #1f9d63;
   --danger: #d24343;
+  --warning: #a86a12;
 }
 
 * {
@@ -200,6 +202,231 @@ select {
 .icon-button:hover {
   background: var(--panel);
   border-color: var(--accent-strong);
+}
+
+/* ── Data provenance ──────────────────────────────────────────────────────
+   Panels are colour-coded by where their numbers come from: green = live from
+   the API, blue = real actions held in this browser, amber = fabricated. */
+
+.panel-title {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.source-badge {
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.source-endpoint {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
+.source-live {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 12%, var(--muted));
+}
+
+.source-local {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--muted));
+}
+
+.source-mock {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 12%, var(--muted));
+}
+
+/* A left edge on the panel makes provenance readable while scrolling. */
+.panel-live {
+  border-left: 3px solid color-mix(in srgb, var(--success) 60%, transparent);
+}
+
+.panel-local {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.panel-mock {
+  border-left: 3px solid color-mix(in srgb, var(--warning) 70%, transparent);
+}
+
+.source-note {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.source-note-mock {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 10%, var(--muted));
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.source-note-local {
+  background: color-mix(in srgb, var(--accent) 8%, var(--muted));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.source-note code,
+.table code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.source-note a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ── Exchange form ────────────────────────────────────────────────────────
+   Two legs, spend above receive, with the amount as the dominant element. */
+
+.leg {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.leg:focus-within {
+  border-color: var(--accent);
+}
+
+.leg-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.leg-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.leg-amount {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 26px;
+  font-weight: 600;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+
+.leg-amount:focus {
+  outline: none;
+}
+
+/* Chrome/Safari spinners crowd a large numeric field. */
+.leg-amount::-webkit-outer-spin-button,
+.leg-amount::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.leg-hint {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.leg-currency {
+  width: auto;
+  flex: 0 0 auto;
+  max-width: 55%;
+  background: var(--panel);
+  font-weight: 600;
+}
+
+/* The swap control straddles the two legs. */
+.swap-row {
+  display: flex;
+  justify-content: center;
+  height: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.swap-row .icon-button {
+  margin-top: -8px;
+  background: var(--panel);
+  font-size: 16px;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 600;
+  padding: 0 0 0 8px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  background: none;
+  transform: none;
+  text-decoration: underline;
+}
+
+.rate-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--muted));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  font-size: 14px;
+}
+
+.adjust-note {
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 10%, var(--muted));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.translation summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted-text);
+  padding: 6px 0;
+}
+
+.translation summary:hover {
+  color: var(--text);
+}
+
+.translation .table td {
+  border-bottom: none;
+  padding: 4px 12px 4px 0;
 }
 
 .table {

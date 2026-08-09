@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
+import { ReferenceProvider } from "./hooks/useReference";
 import { ThemeProvider } from "./hooks/useTheme";
 import { AuthPage } from "./pages/AuthPage";
 import { CreateTradePage } from "./pages/CreateTradePage";
@@ -61,11 +62,13 @@ const RoutedApp: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <RoutedApp />
-        </BrowserRouter>
-      </AuthProvider>
+      <ReferenceProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <RoutedApp />
+          </BrowserRouter>
+        </AuthProvider>
+      </ReferenceProvider>
     </ThemeProvider>
   );
 };

@@ -70,6 +70,7 @@ func (router *UserRouter) UserRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: Perhaps move this out of the router and into service
 	err = router.Services.Users.GiveStartingBalance(ctx, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -99,8 +100,7 @@ func (router *UserRouter) UserGetHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	writeJSON(w, http.StatusOK, user)
 }
 
 func (router *UserRouter) UserGetSelf(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +122,5 @@ func (router *UserRouter) UserGetSelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	writeJSON(w, http.StatusOK, user)
 }

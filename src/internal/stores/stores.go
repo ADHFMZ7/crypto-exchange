@@ -7,11 +7,13 @@ import (
 type Stores struct {
 	Users   *UserStore
 	Wallets *WalletStore
+	Orders  *OrderStore
 }
 
 func NewStores(pool *pgxpool.Pool) *Stores {
 	return &Stores{
 		Users:   &UserStore{pool},
 		Wallets: &WalletStore{pool},
+		Orders:  &OrderStore{pool},
 	}
 }

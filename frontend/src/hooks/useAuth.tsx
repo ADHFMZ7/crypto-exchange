@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { ApiError, api, errorMessage } from "../lib/api";
 import type { User } from "../types";
 
 type AuthContextValue = {
@@ -14,7 +15,6 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const STORAGE_KEY = "crypto-exchange-token";
 
 export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
@@ -38,23 +38,16 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setLoading(true);
     setError(undefined);
     try {
-      const res = await fetch(`${API_BASE}/users/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      if (!res.ok) {
-        throw new Error(`Unable to fetch user: ${res.status}`);
-      }
-
-      const data: User = await res.json();
-      setUser(data);
+      setUser(await api.getMe(token));
     } catch (err) {
-      console.error(err);
-      setUser(null);
-      setError("Session expired, please log in again.");
-      logout();
+      // Only a rejected token should end the session. A backend that is down or
+      // unreachable must not silently sign the user out.
+      if (err instanceof ApiError && err.isUnauthorized) {
+        setError("Session expired, please log in again.");
+        logout();
+        return;
+      }
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -72,34 +65,20 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setError(undefined);
 
       try {
-        const res = await fetch(`${API_BASE}/auth/login`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ email, password })
-        });
-
-        if (!res.ok) {
-          const message = await res.text();
-          throw new Error(message || "Login failed");
-        }
-
-        const data = (await res.json()) as { token: string };
-        setToken(data.token);
-        localStorage.setItem(STORAGE_KEY, data.token);
-        await refreshUser();
+        const { token: issued } = await api.login(email, password);
+        setToken(issued);
+        localStorage.setItem(STORAGE_KEY, issued);
+        setUser(await api.getMe(issued));
         return true;
       } catch (err) {
-        console.error(err);
-        setError(err instanceof Error ? err.message : "Login failed");
+        setError(errorMessage(err));
         logout();
         return false;
       } finally {
         setLoading(false);
       }
     },
-    [logout, refreshUser]
+    [logout]
   );
 
   const signup = useCallback(
@@ -108,43 +87,22 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       setError(undefined);
 
       try {
-        const res = await fetch(`${API_BASE}/users`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ email, fullname, password })
-        });
-
-        if (!res.ok) {
-          const message = await res.text();
-          throw new Error(message || "Signup failed");
-        }
-
-        // After signup, attempt a login so the user lands in the app
-        return await login(email, password);
+        await api.signup(email, fullname, password);
       } catch (err) {
-        console.error(err);
-        setError(err instanceof Error ? err.message : "Signup failed");
-        return false;
-      } finally {
+        setError(errorMessage(err));
         setLoading(false);
+        return false;
       }
+
+      setLoading(false);
+      // Land the new account straight in the app.
+      return login(email, password);
     },
     [login]
   );
 
   const value = useMemo(
-    () => ({
-      user,
-      token,
-      loading,
-      error,
-      login,
-      signup,
-      logout,
-      refreshUser
-    }),
+    () => ({ user, token, loading, error, login, signup, logout, refreshUser }),
     [error, loading, login, logout, refreshUser, signup, token, user]
   );
 
