@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# Refuses a push when the tree does not build or tests do not pass.
+#
+# This runs the same checks as .github/workflows/ci.yml, so a red CI run
+# should be rare and surprising rather than routine. Finding out locally in
+# five seconds beats finding out on GitHub in two minutes.
+#
+# Deliberate bypass:  git push --no-verify
+# Bypassing is fine when you know why. Doing it habitually is the smell.
+
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+echo "pre-push: gofmt"
+unformatted=$(gofmt -l src)
+if [ -n "$unformatted" ]; then
+	echo "  not gofmt-clean:"
+	echo "$unformatted" | sed 's/^/    /'
+	echo "  fix with: gofmt -w src"
+	exit 1
+fi
+
+echo "pre-push: go build"
+(cd src && go build ./...)
+
+echo "pre-push: go vet"
+(cd src && go vet ./...)
+
+echo "pre-push: go test"
+(cd src && go test ./...)
+
+if [ -d frontend/node_modules ]; then
+	echo "pre-push: tsc"
+	(cd frontend && npx tsc -b)
+else
+	echo "pre-push: skipping tsc (frontend/node_modules missing — run: cd frontend && npm ci)"
+fi
+
+echo "pre-push: ok"

@@ -1,0 +1,25 @@
+
+# <type>(<scope>): <subject>
+#
+# Subject: imperative mood, lowercase, no full stop, <= 72 chars.
+#   "add filled quantity to orders"   not   "Added filled quantity"
+#
+# type:  feat fix refactor perf test docs chore build ci
+# scope: api wallet orders market orderbook db frontend infra
+#
+# ---- body: wrap at 72 -------------------------------------------------|
+#
+# Explain WHY, not HOW. The diff already shows how.
+#   - What was wrong or missing before this change?
+#   - What does this change make possible, or make impossible?
+#   - What did you consider and reject, if it is not obvious?
+#
+# ---- before you save --------------------------------------------------
+#
+#  [ ] One logical change. If the subject needs "and", split the commit.
+#  [ ] Tests for this change are in THIS commit, not a later one.
+#  [ ] Builds, and tests pass.
+#  [ ] Every line is one you can explain. If you cannot, cut it.
+#  [ ] Nothing unrelated snuck in — check `git diff --cached` once more.
+#
+# Lines starting with # are stripped and will not appear in the message.
