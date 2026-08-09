@@ -2,3 +2,8 @@ node_modules
 dist
 *.log
 /.vite
+
+# tsc -b output — generated, not source
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
