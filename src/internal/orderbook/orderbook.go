@@ -72,8 +72,8 @@ func NewOrderbook() *Orderbook {
 
 func (ob *Orderbook) MatchOrder(order *Order) *Order {
 
-	fmt.Printf("\n[MatchOrder] Incoming order ID=%d Side=%v Shares=%d Limit=%d\n",
-		order.ID, order.Side, order.Shares, order.Limit)
+	// fmt.Printf("\n[MatchOrder] Incoming order ID=%d Side=%v Shares=%d Limit=%d\n",
+	// 	order.ID, order.Side, order.Shares, order.Limit)
 
 	if order.Side == Buy {
 
@@ -233,8 +233,8 @@ func (ob *Orderbook) MatchOrder(order *Order) *Order {
 
 func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) {
 
-	fmt.Printf("\n[LimitSell] New SELL order ID=%d Shares=%d Limit=%d\n",
-		orderId, shares, limit)
+	// fmt.Printf("\n[LimitSell] New SELL order ID=%d Shares=%d Limit=%d\n",
+	// orderId, shares, limit)
 
 	entry_time := time.Now()
 
@@ -262,8 +262,8 @@ func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) {
 
 func (ob *Orderbook) LimitBuy(orderId OrderID, shares Shares, limit Price) {
 
-	fmt.Printf("\n[LimitBuy] New BUY order ID=%d Shares=%d Limit=%d\n",
-		orderId, shares, limit)
+	// fmt.Printf("\n[LimitBuy] New BUY order ID=%d Shares=%d Limit=%d\n",
+	// 	orderId, shares, limit)
 
 	entry_time := time.Now()
 
@@ -372,7 +372,7 @@ func (ob *Orderbook) AddOrder(order *Order) {
 	ob.OrderMap[order.ID] = orderIx
 
 	// fmt.Printf("[AddOrder] Order registered globally index=%d\n", orderIx)
-	ob.PrintBook()
+	// ob.PrintBook()
 }
 
 func (ob *Orderbook) AddLevel(limitPrice Price, side Side) int {

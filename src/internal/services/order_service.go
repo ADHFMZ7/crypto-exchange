@@ -18,9 +18,8 @@ type OrderService struct {
 
 	Registry *market.Registry
 
-	Orderbook *orderbook.Orderbook
-
-	RQueues map[string]chan Request
+	Orderbooks map[string]*orderbook.Orderbook
+	RQueues    map[string]chan Request
 }
 
 func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry) *OrderService {
@@ -33,29 +32,32 @@ func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderSt
 
 		Registry: registry,
 
-		Orderbook: orderbook.NewOrderbook(),
-
-		RQueues: channels,
+		Orderbooks: make(map[string]*orderbook.Orderbook),
+		RQueues:    channels,
 	}
 
 	for _, m := range registry.Markets() {
+		service.Orderbooks[m.Symbol] = orderbook.NewOrderbook()
 		channels[m.Symbol] = make(chan Request, 1024)
-		go service.StartWorker(channels[m.Symbol])
+		go service.StartWorker(channels[m.Symbol], m.Symbol)
 	}
 
 	return service
 }
 
-func (service *OrderService) StartWorker(channel chan Request) {
+func (service *OrderService) StartWorker(channel chan Request, market string) {
 
-	// TODO: URGENT, there is only one orderbook consuming from many channels. Make an orderbook per channel.
+	book, ok := service.Orderbooks[market]
+	if !ok {
+		return
+	}
 
 	for request := range channel {
 
 		id := orderbook.OrderID(request.OrderID)
 
 		if request.Type == Cancel {
-			service.Orderbook.Cancel(id)
+			book.Cancel(id)
 			continue
 		}
 
@@ -64,9 +66,9 @@ func (service *OrderService) StartWorker(channel chan Request) {
 
 		switch request.Type {
 		case LimitBuy:
-			service.Orderbook.LimitBuy(id, shares, price)
+			book.LimitBuy(id, shares, price)
 		case LimitSell:
-			service.Orderbook.LimitSell(id, shares, price)
+			book.LimitSell(id, shares, price)
 		}
 
 	}
