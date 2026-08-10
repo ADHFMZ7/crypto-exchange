@@ -34,22 +34,24 @@ func testRegistry(t *testing.T) *market.Registry {
 	return registry
 }
 
-// newTestService wires a registry and a queue per market, with no store behind
-// it. The queue is buffered and never drained, so nothing consumes what
+// newTestService wires a registry, a queue and a book per market, with no store
+// behind it. The queue is buffered and never drained, so nothing consumes what
 // CreateOrder enqueues.
 func newTestService(t *testing.T) *OrderService {
 	t.Helper()
 
 	registry := testRegistry(t)
 	queues := map[string]chan Request{}
+	books := map[string]*orderbook.Orderbook{}
 	for _, m := range registry.Markets() {
 		queues[m.Symbol] = make(chan Request, 8)
+		books[m.Symbol] = orderbook.NewOrderbook()
 	}
 
 	return &OrderService{
-		Registry:  registry,
-		Orderbook: orderbook.NewOrderbook(),
-		RQueues:   queues,
+		Registry:   registry,
+		Orderbooks: books,
+		RQueues:    queues,
 	}
 }
 
@@ -203,8 +205,17 @@ func TestCreateOrderRejectsMarketWithNoQueue(t *testing.T) {
 	}
 }
 
+// newWorkerService returns a service holding one book for symbol, and that book,
+// so a test can drive the worker and then inspect what it did.
+func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook) {
+	book := orderbook.NewOrderbook()
+	return &OrderService{
+		Orderbooks: map[string]*orderbook.Orderbook{symbol: book},
+	}, book
+}
+
 func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
-	service := &OrderService{Orderbook: orderbook.NewOrderbook()}
+	service, book := newWorkerService("BTC-USD")
 
 	// Buffered and closed up front, so StartWorker drains and returns rather
 	// than blocking — no goroutine, no sleep, fully deterministic.
@@ -213,17 +224,17 @@ func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
 	queue <- Request{Type: LimitBuy, OrderID: 2, Shares: 40, Price: 2500}
 	close(queue)
 
-	service.StartWorker(queue)
+	service.StartWorker(queue, "BTC-USD")
 
 	// The buy crossed and took 40 of the resting 100.
-	if got := service.Orderbook.BestSell(); got != 2400 {
+	if got := book.BestSell(); got != 2400 {
 		t.Fatalf("best ask = %d, want 2400", got)
 	}
-	if got := service.Orderbook.BestBuy(); got != -1 {
+	if got := book.BestBuy(); got != -1 {
 		t.Fatalf("best bid = %d, want -1: the buy was fully filled", got)
 	}
 
-	level := service.Orderbook.LevelsSell[service.Orderbook.LevelMapSell[2400]]
+	level := book.LevelsSell[book.LevelMapSell[2400]]
 	resting, ok := level.Orders.Peek()
 	if !ok {
 		t.Fatal("expected a resting sell order")
@@ -234,38 +245,101 @@ func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
 }
 
 func TestStartWorkerHandlesCancel(t *testing.T) {
-	service := &OrderService{Orderbook: orderbook.NewOrderbook()}
+	service, book := newWorkerService("BTC-USD")
 
 	queue := make(chan Request, 4)
 	queue <- Request{Type: LimitBuy, OrderID: 1, Shares: 100, Price: 2500}
 	queue <- Request{Type: Cancel, OrderID: 1}
 	close(queue)
 
-	service.StartWorker(queue)
+	service.StartWorker(queue, "BTC-USD")
 
 	// Cancellation is lazy: the order is flagged, and evicted when matching
 	// next reaches it. So the incoming sell finds nothing to trade with.
-	service.Orderbook.LimitSell(2, 50, 2400)
+	book.LimitSell(2, 50, 2400)
 
-	if got := service.Orderbook.BestBuy(); got != -1 {
+	if got := book.BestBuy(); got != -1 {
 		t.Fatalf("best bid = %d, want -1: the only bid was cancelled", got)
 	}
-	if got := service.Orderbook.BestSell(); got != 2400 {
+	if got := book.BestSell(); got != 2400 {
 		t.Fatalf("best ask = %d, want 2400: the sell should rest, not fill", got)
+	}
+}
+
+// Each market owns its own book, so an order on one market must not match
+// against orders resting on another. This is the whole point of issue #4:
+// before it, one Orderbook was shared by every market's worker.
+func TestMarketsDoNotShareABook(t *testing.T) {
+	btcBook := orderbook.NewOrderbook()
+	ethBook := orderbook.NewOrderbook()
+
+	service := &OrderService{
+		Orderbooks: map[string]*orderbook.Orderbook{
+			"BTC-USD": btcBook,
+			"ETH-USD": ethBook,
+		},
+	}
+
+	btcQueue := make(chan Request, 2)
+	btcQueue <- Request{Type: LimitSell, OrderID: 1, Shares: 100, Price: 2400}
+	close(btcQueue)
+	service.StartWorker(btcQueue, "BTC-USD")
+
+	// Priced far above the resting BTC ask. On a shared book it would cross it.
+	ethQueue := make(chan Request, 2)
+	ethQueue <- Request{Type: LimitBuy, OrderID: 2, Shares: 100, Price: 9999}
+	close(ethQueue)
+	service.StartWorker(ethQueue, "ETH-USD")
+
+	if got := btcBook.BestSell(); got != 2400 {
+		t.Fatalf("BTC best ask = %d, want 2400: the ETH buy took liquidity from another market", got)
+	}
+	if got := ethBook.BestBuy(); got != 9999 {
+		t.Fatalf("ETH best bid = %d, want 9999: it should rest, not fill", got)
+	}
+	if got := ethBook.BestSell(); got != -1 {
+		t.Fatalf("ETH best ask = %d, want -1: nothing was ever sold on this market", got)
+	}
+}
+
+// A worker started for a market with no book must return rather than run on
+// with a nil book, which would panic on the first request.
+func TestStartWorkerReturnsWhenMarketHasNoBook(t *testing.T) {
+	service := &OrderService{Orderbooks: map[string]*orderbook.Orderbook{}}
+
+	queue := make(chan Request, 1)
+	queue <- Request{Type: LimitBuy, OrderID: 1, Shares: 100, Price: 2500}
+
+	done := make(chan struct{})
+	go func() {
+		service.StartWorker(queue, "BTC-USD")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartWorker did not return for a market with no book")
+	}
+
+	if len(queue) != 1 {
+		t.Fatal("StartWorker consumed a request for a market it has no book for")
 	}
 }
 
 // StartWorker returns when its channel closes. Anything else leaks a goroutine
 // per market for the lifetime of the process.
 func TestStartWorkerReturnsWhenChannelCloses(t *testing.T) {
-	service := &OrderService{Orderbook: orderbook.NewOrderbook()}
+	// The book must exist, or this passes for the wrong reason — the worker
+	// would return on the missing-book guard without ever reaching the range.
+	service, _ := newWorkerService("BTC-USD")
 
 	queue := make(chan Request)
 	close(queue)
 
 	done := make(chan struct{})
 	go func() {
-		service.StartWorker(queue)
+		service.StartWorker(queue, "BTC-USD")
 		close(done)
 	}()
 
