@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
 import { IntegrationStatus } from "../components/IntegrationStatus";
 import { MarketTable } from "../components/MarketTable";
+import { ReferenceStatus } from "../components/ReferenceStatus";
 import { useAuth } from "../hooks/useAuth";
 import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
@@ -240,6 +241,8 @@ export const TradesPage: React.FC = () => {
       <FillsPanel />
 
       <MarketTable />
+
+      <ReferenceStatus />
 
       <IntegrationStatus />
     </div>

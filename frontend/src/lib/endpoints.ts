@@ -54,6 +54,14 @@ export const ENDPOINTS: EndpointStatus[] = [
     purpose: "Place a limit order: market, side, quantity, price"
   },
   {
+    method: "POST",
+    path: "/orders (market order)",
+    state: "mock",
+    purpose: "Trade immediately at whatever the book charges, sized by spend",
+    workaround:
+      "The Market tab is visible but disabled — orders.quantity is NOT NULL with no quote-denominated size, and requestTypeFor maps a side to LimitBuy/LimitSell only"
+  },
+  {
     method: "GET",
     path: "/currencies",
     state: "live",

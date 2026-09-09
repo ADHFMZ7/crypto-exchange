@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 
@@ -17,9 +17,15 @@ const links = [
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { user, logout } = useAuth();
   const { theme, toggle } = useTheme();
+  const { pathname } = useLocation();
+
+  // The trade screen is a dashboard, not a document: its panels tile to fill
+  // one viewport and scroll their own bodies. Every other route reads
+  // top-to-bottom and keeps the normal page scroll and the narrower measure.
+  const filling = pathname === "/trades/new";
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${filling ? " app-shell-fill" : ""}`}>
       <header className="panel nav">
         <Link className="brand" to="/">
           Crypto Exchange
@@ -79,7 +85,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
       </header>
 
-      <main>{children}</main>
+      <main className={filling ? "app-main-fill" : undefined}>{children}</main>
     </div>
   );
 };

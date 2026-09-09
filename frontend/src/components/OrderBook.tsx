@@ -6,10 +6,15 @@ import { api, errorMessage } from "../lib/api";
 import { formatPrice, formatQuantity } from "../lib/markets";
 import type { DepthLevel, OrderbookSnapshot } from "../types";
 
-const LEVELS = 8;
+// Five a side, plus the spread row, is what fits one tile without clipping.
+// Deeper and the far bids fall below the fold — which hides the half a buyer
+// is actually resting against, the opposite of what the panel is for.
+const LEVELS = 5;
 
 type Props = {
   symbol: string | undefined;
+  /** Lets the ticket seed its price from the touch without fetching it again. */
+  onSnapshot?: (book: OrderbookSnapshot) => void;
 };
 
 /**
@@ -24,7 +29,7 @@ type Props = {
  * spread, which is how a book is conventionally read even though the API
  * returns both best-first.
  */
-export const OrderBook: React.FC<Props> = ({ symbol }) => {
+export const OrderBook: React.FC<Props> = ({ symbol, onSnapshot }) => {
   const { reference } = useReference();
 
   const [book, setBook] = useState<OrderbookSnapshot>();
@@ -33,12 +38,14 @@ export const OrderBook: React.FC<Props> = ({ symbol }) => {
   const load = useCallback(async () => {
     if (!symbol) return;
     try {
-      setBook(await api.getOrderbook(symbol, LEVELS));
+      const snapshot = await api.getOrderbook(symbol, LEVELS);
+      setBook(snapshot);
+      onSnapshot?.(snapshot);
       setError(undefined);
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [symbol]);
+  }, [onSnapshot, symbol]);
 
   usePolling(load, 2500, Boolean(symbol));
 
@@ -52,46 +59,40 @@ export const OrderBook: React.FC<Props> = ({ symbol }) => {
   const spread =
     bids.length && asks.length ? asks[0].price - bids[0].price : undefined;
 
-  const row = (level: DepthLevel, side: "bid" | "ask") => (
-    <tr key={`${side}-${level.price}`}>
-      <td style={{ position: "relative" }}>
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: "2px auto 2px 0",
-            width: `${(level.quantity / deepest) * 100}%`,
-            background: side === "bid" ? "var(--success)" : "var(--danger)",
-            opacity: 0.14,
-            borderRadius: 2
-          }}
-        />
-        <span style={{ position: "relative", color: side === "bid" ? "var(--success)" : "var(--danger)" }}>
+  const row = (level: DepthLevel, side: "bid" | "ask") => {
+    const share = Math.max(2, Math.round((level.quantity / deepest) * 100));
+    const tone = side === "bid" ? "var(--success)" : "var(--danger)";
+
+    return (
+      <tr
+        key={`${side}-${level.price}`}
+        // A gradient stop rather than an absolutely-positioned bar, so the
+        // depth reads across the whole row instead of inside one cell.
+        style={{
+          backgroundImage: `linear-gradient(to left, color-mix(in srgb, ${tone} 16%, transparent) ${share}%, transparent ${share}%)`
+        }}
+      >
+        <td style={{ color: tone }}>
           {symbol ? formatPrice(reference, symbol, level.price) : level.price}
-        </span>
-      </td>
-      <td style={{ textAlign: "right" }}>
-        {symbol ? formatQuantity(reference, symbol, level.quantity) : level.quantity}
-      </td>
-      <td style={{ textAlign: "right" }} className="muted">
-        {level.orders}
-      </td>
-    </tr>
-  );
+        </td>
+        <td style={{ textAlign: "right" }}>
+          {symbol ? formatQuantity(reference, symbol, level.quantity) : level.quantity}
+        </td>
+        <td style={{ textAlign: "right" }} className="muted">
+          {level.orders}
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <SourcedPanel
       eyebrow="Depth"
-      title={symbol ? `Order book — ${symbol}` : "Order book"}
+      title="Order book"
       kind="live"
       endpoint="GET /orderbook/{symbol}"
-      note={
-        <>
-          Resting orders in the matching engine's memory, refreshed every couple of seconds. Volume
-          shown is what is actually matchable — cancelled orders are excluded even before the engine
-          evicts them.
-        </>
-      }
+      fill
+      note={<>Resting in the engine's memory. Cancelled orders are already excluded.</>}
     >
       {error && <div className="pill status-danger">{error}</div>}
 

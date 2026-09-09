@@ -54,6 +54,11 @@ type PanelProps = {
   endpoint?: string;
   note?: React.ReactNode;
   actions?: React.ReactNode;
+  /**
+   * Stretch to the height of the grid cell and scroll the body rather than the
+   * page. For tiled layouts where every panel should end on the same line.
+   */
+  fill?: boolean;
   children: React.ReactNode;
 };
 
@@ -68,9 +73,10 @@ export const SourcedPanel: React.FC<PanelProps> = ({
   endpoint,
   note,
   actions,
+  fill = false,
   children
 }) => (
-  <section className={`panel panel-${kind}`}>
+  <section className={`panel panel-${kind}${fill ? " panel-fill" : ""}`}>
     <div className="headline">
       <div>
         {eyebrow && <div className="tag">{eyebrow}</div>}
@@ -82,6 +88,6 @@ export const SourcedPanel: React.FC<PanelProps> = ({
       </div>
     </div>
     {note && <SourceNote kind={kind}>{note}</SourceNote>}
-    {children}
+    {fill ? <div className="panel-body">{children}</div> : children}
   </section>
 );

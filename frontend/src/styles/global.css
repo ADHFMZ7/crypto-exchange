@@ -316,7 +316,7 @@ select {
   background: var(--muted);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 14px 16px;
+  padding: 11px 14px;
 }
 
 .leg:focus-within {
@@ -342,7 +342,7 @@ select {
 .leg-amount {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 600;
   padding: 4px 0;
   border: none;
@@ -366,46 +366,6 @@ select {
   margin-top: 4px;
 }
 
-.leg-currency {
-  width: auto;
-  flex: 0 0 auto;
-  max-width: 55%;
-  background: var(--panel);
-  font-weight: 600;
-}
-
-/* The swap control straddles the two legs. */
-.swap-row {
-  display: flex;
-  justify-content: center;
-  height: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.swap-row .icon-button {
-  margin-top: -8px;
-  background: var(--panel);
-  font-size: 16px;
-}
-
-.link-button {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-size: inherit;
-  font-weight: 600;
-  padding: 0 0 0 8px;
-  box-shadow: none;
-  cursor: pointer;
-}
-
-.link-button:hover {
-  background: none;
-  transform: none;
-  text-decoration: underline;
-}
-
 .rate-line {
   display: flex;
   justify-content: space-between;
@@ -417,31 +377,6 @@ select {
   background: color-mix(in srgb, var(--accent) 8%, var(--muted));
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   font-size: 14px;
-}
-
-.adjust-note {
-  font-size: 14px;
-  line-height: 1.5;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--warning) 10%, var(--muted));
-  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
-}
-
-.translation summary {
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--muted-text);
-  padding: 6px 0;
-}
-
-.translation summary:hover {
-  color: var(--text);
-}
-
-.translation .table td {
-  border-bottom: none;
-  padding: 4px 12px 4px 0;
 }
 
 .table {
@@ -479,4 +414,301 @@ select {
   .nav-links {
     flex-wrap: wrap;
   }
+}
+
+/* ── Trade screen ─────────────────────────────────────────────────────────
+   A dashboard, not a document: three tiles of equal width that fill one
+   viewport together and scroll their own bodies. Every other route keeps the
+   narrower measure and the normal page scroll. */
+
+.app-shell-fill {
+  max-width: 1500px;
+  height: 100vh;
+  padding-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* min-height:0 is what lets the grid inside shrink rather than overflow —
+   a flex item's default min-height:auto would push the page taller instead. */
+.app-main-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.trade-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  height: 100%;
+}
+
+.trade-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  min-height: 0;
+}
+
+.panel-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Below three comfortable columns the tiles would be unreadable, so the screen
+   stops pretending to be one: normal stacking, normal scroll. */
+@media (max-width: 1180px) {
+  .app-shell-fill {
+    height: auto;
+    padding-bottom: 64px;
+    display: block;
+  }
+
+  .trade-screen {
+    height: auto;
+    grid-template-rows: none;
+  }
+
+  .trade-tiles {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-fill {
+    height: auto;
+  }
+
+  .panel-body {
+    overflow: visible;
+  }
+}
+
+.market-header {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+}
+
+.market-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.market-last {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.market-last-price {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.market-change {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+}
+
+.market-stats {
+  display: flex;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+
+.market-stat-label {
+  color: var(--muted-text);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.market-stat-value {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+}
+
+.market-header-actions {
+  margin-left: auto;
+}
+
+.ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+/* Side is a toggle, not an inference from which currency you picked. */
+.side-toggle {
+  display: flex;
+  gap: 8px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.side-option {
+  flex: 1 1 0;
+  padding: 9px 0;
+  border-radius: 9px;
+  background: transparent;
+  border: none;
+  color: var(--muted-text);
+  font-weight: 600;
+  font-size: 15px;
+  box-shadow: none;
+}
+
+.side-option:hover {
+  transform: none;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.side-option-buy,
+.side-option-buy:hover {
+  background: var(--success);
+  color: var(--button-text);
+  font-weight: 700;
+}
+
+.side-option-sell,
+.side-option-sell:hover {
+  background: var(--danger);
+  color: var(--button-text);
+  font-weight: 700;
+}
+
+.order-type-tabs {
+  display: flex;
+  align-items: baseline;
+  gap: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.order-type {
+  font-size: 14px;
+  padding-bottom: 8px;
+  color: var(--muted-text);
+  border-bottom: 2px solid transparent;
+}
+
+.order-type-active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+/* Market orders need a backend that does not exist yet: orders.quantity is
+   NOT NULL and there is no market request type. Showing the tab disabled says
+   that honestly rather than hiding the plan. */
+.order-type-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.order-type-note {
+  margin-left: auto;
+  font-size: 12px;
+  padding-bottom: 8px;
+}
+
+/* Price is the decision on a limit order, so it is the field that reads first. */
+.leg-price {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--muted));
+}
+
+.leg-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.leg-unit {
+  flex: 0 0 auto;
+  color: var(--muted-text);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+label.leg {
+  display: block;
+  cursor: text;
+}
+
+.percentages {
+  display: flex;
+  gap: 8px;
+}
+
+.percentage {
+  flex: 1 1 0;
+  padding: 7px 0;
+  border-radius: 10px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--muted-text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.percentage:hover {
+  transform: none;
+  background: var(--panel);
+  border-color: var(--accent-strong);
+  color: var(--text);
+}
+
+.submit-order {
+  color: var(--button-text);
+  font-size: 16px;
+  font-weight: 700;
+  padding: 12px 16px;
+}
+
+.submit-order:hover {
+  transform: none;
+  filter: brightness(1.06);
+}
+
+/* Loads the price the current side would cross. Reads as a value with an
+   action attached rather than a button, because that is what it is. */
+.touch-button {
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.touch-button:hover {
+  background: none;
+  transform: none;
+  text-decoration: underline;
+}
+
+/* The ticket fills its tile and pins the submit to the bottom edge, so the
+   column ends level with the book and the tape instead of trailing off. */
+.panel-fill .ticket {
+  min-height: 100%;
+}
+
+.panel-fill .submit-order {
+  margin-top: auto;
 }
