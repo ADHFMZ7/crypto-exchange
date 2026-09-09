@@ -128,7 +128,7 @@ func newTestStore(t *testing.T) *TradeStore {
 	}
 
 	_, err := testPool.Exec(context.Background(),
-		`TRUNCATE trades, orders, balances, users RESTART IDENTITY CASCADE`)
+		`TRUNCATE ledger_events, trades, orders, balances, users RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("could not clear tables: %v", err)
 	}

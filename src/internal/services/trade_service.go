@@ -3,29 +3,35 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type TradeService struct {
 	WalletStore *stores.WalletStore
 	UserStore   *stores.UserStore
 	TradeStore  *stores.TradeStore
+	OutboxStore *stores.OutboxStore
 
 	MarketRegistry *market.Registry
 
 	SettlementChan chan models.LedgerEvent
 }
 
-func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, registry *market.Registry, SChan chan models.LedgerEvent) *TradeService {
+func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, outboxStore *stores.OutboxStore, registry *market.Registry, SChan chan models.LedgerEvent) *TradeService {
 
 	service := &TradeService{
 		WalletStore: walletStore,
 		UserStore:   userStore,
 		TradeStore:  tradeStore,
+		OutboxStore: outboxStore,
 
 		MarketRegistry: registry,
 		SettlementChan: SChan,
@@ -44,77 +50,207 @@ func (service *TradeService) SettlementWorker() {
 	log.Println("settlement: worker started")
 
 	for event := range service.SettlementChan {
-		switch {
-		case event.Fill != nil:
-			service.settleFill(ctx, *event.Fill)
-		case event.Cancel != nil:
-			service.releaseCancelled(ctx, *event.Cancel)
-		}
+		service.absorb(ctx, event)
 	}
 
 	log.Println("settlement: worker stopped, no further events will be applied")
 }
 
-// settleFill applies one execution to the ledger.
+// How hard to try before writing an event off. The delays are short because the
+// failure this exists for is a moment's database trouble, not an outage — an
+// outage is what the pending rows and the next boot's replay are for.
+const (
+	settlementAttempts = 5
+	settlementBackoff  = 60 * time.Millisecond
+)
+
+// absorb records one effect and then applies it.
 //
-// A fill that cannot be applied is dropped after logging: the book has already
-// acted on it and will not agree with the ledger afterwards. Every message names
-// the orders involved, because it is the only trace of what the two now
-// disagree about.
-func (service *TradeService) settleFill(ctx context.Context, trade models.Trade) {
+// Recording first is the whole point. Until the row exists, a failure loses the
+// engine's decision with nothing left to show for it; once it exists, a failure
+// is a delay, and the worst case is a row somebody has to look at.
+func (service *TradeService) absorb(ctx context.Context, event models.LedgerEvent) {
+	id, err := service.OutboxStore.Append(ctx, event)
+	if err != nil {
+		// The database will not even take a note. Applying is hopeless, and
+		// there is nowhere durable left to put this — the next boot's flush is
+		// what makes the two sides agree again.
+		log.Printf("settlement: could not record %s, dropping it: %v", describe(event), err)
+		return
+	}
+
+	service.applyRecorded(ctx, id, event)
+}
+
+// applyRecorded works one recorded event until it lands or is written off.
+//
+// It blocks the worker while it retries, which backs the channel up and can
+// eventually stall matching. That is the intended trade: an engine that keeps
+// matching into a ledger that has stopped recording is producing divergence as
+// fast as it can.
+func (service *TradeService) applyRecorded(ctx context.Context, id int64, event models.LedgerEvent) {
+	for attempt := 1; ; attempt++ {
+		err := service.apply(ctx, event)
+
+		if err == nil {
+			if err := service.OutboxStore.MarkApplied(ctx, id); err != nil {
+				// Applied but not marked: the replay at next boot will try it
+				// again. Both halves are idempotent against a terminal order,
+				// so a second attempt finds nothing left to do.
+				log.Printf("settlement: event %d applied but not marked: %v", id, err)
+			}
+			return
+		}
+
+		if permanent(err) || attempt >= settlementAttempts {
+			log.Printf("settlement: GIVING UP on event %d after %d attempt(s) — %s: %v",
+				id, attempt, describe(event), err)
+			if err := service.OutboxStore.MarkFailed(ctx, id, err.Error()); err != nil {
+				log.Printf("settlement: could not mark event %d failed: %v", id, err)
+			}
+			return
+		}
+
+		_ = service.OutboxStore.RecordAttempt(ctx, id, err.Error())
+		time.Sleep(time.Duration(attempt) * settlementBackoff)
+	}
+}
+
+// apply routes an event to the half of the ledger it belongs to.
+func (service *TradeService) apply(ctx context.Context, event models.LedgerEvent) error {
+	switch {
+	case event.Fill != nil:
+		return service.settleFill(ctx, *event.Fill)
+	case event.Cancel != nil:
+		return service.releaseCancelled(ctx, *event.Cancel)
+	}
+	return models.ErrEmptyLedgerEvent
+}
+
+// permanent reports whether retrying could ever help.
+//
+// Two families qualify. Ours: an unknown market, a side that is not a side, a
+// notional that cannot be computed — the event is malformed and will be just as
+// malformed in a second. And Postgres integrity violations (SQLSTATE class 23),
+// which mean the data is wrong rather than the moment: a fill that would
+// overshoot its order, or a lock that would go negative.
+//
+// Everything else — a dropped connection, a lock timeout, a restarting database
+// — is worth another go. Guessing wrong in this direction costs a few
+// milliseconds; guessing wrong the other way writes off a fill that would have
+// applied on the next attempt.
+func permanent(err error) bool {
+	if errors.Is(err, ErrUnknownMarket) ||
+		errors.Is(err, models.ErrEmptyLedgerEvent) ||
+		errors.Is(err, stores.ErrNoBalance) ||
+		errors.Is(err, market.ErrNotPositive) ||
+		errors.Is(err, market.ErrOverflow) ||
+		errors.Is(err, market.ErrInvalidSide) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23")
+}
+
+// ReplayPending applies everything the ledger is still owed from a previous run.
+//
+// It must run BEFORE the startup flush. A pending fill advances an order and
+// draws down its lock; if the flush had already cancelled that order and zeroed
+// locked_remaining, applying the fill would drive it negative and be refused by
+// orders_locked_remaining_non_negative. Owed first, then unwind what is left.
+func (service *TradeService) ReplayPending(ctx context.Context) error {
+	pending, err := service.OutboxStore.Pending(ctx, 10_000)
+	if err != nil {
+		return fmt.Errorf("reading pending ledger events: %w", err)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	log.Printf("startup: %d ledger event(s) owed from a previous run", len(pending))
+
+	for _, row := range pending {
+		event, err := stores.DecodeEvent(row.Kind, row.Payload)
+		if err != nil {
+			log.Printf("startup: event %d is unreadable (%s): %v", row.ID, row.Kind, err)
+			if err := service.OutboxStore.MarkFailed(ctx, row.ID, err.Error()); err != nil {
+				return err
+			}
+			continue
+		}
+		service.applyRecorded(ctx, row.ID, event)
+	}
+
+	failed, err := service.OutboxStore.FailedCount(ctx)
+	if err != nil {
+		return err
+	}
+	if failed > 0 {
+		log.Printf("startup: WARNING %d ledger event(s) were never applied — "+
+			"the book that produced them is gone, so this is a divergence only a person can close",
+			failed)
+	}
+
+	return nil
+}
+
+// describe names an event for a log line, since a dropped one leaves nothing else.
+func describe(event models.LedgerEvent) string {
+	switch {
+	case event.Fill != nil:
+		f := event.Fill
+		return fmt.Sprintf("fill on %s (orders %d/%d, %d @ %d)",
+			f.Market, f.RestingOrderID, f.IncomingOrderID, f.Quantity, f.Price)
+	case event.Cancel != nil:
+		return fmt.Sprintf("cancellation of order %d on %s", event.Cancel.OrderID, event.Cancel.Market)
+	}
+	return "an empty event"
+}
+
+// settleFill applies one execution to the ledger.
+func (service *TradeService) settleFill(ctx context.Context, trade models.Trade) error {
 
 	m, ok := service.MarketRegistry.BySymbol(trade.Market)
 	if !ok {
-		log.Printf("settlement: dropped fill on unknown market %q (orders %d/%d, %d @ %d)",
-			trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price)
-		return
+		return fmt.Errorf("%w: %q", ErrUnknownMarket, trade.Market)
 	}
 
 	quoteAmount, err := m.FillNotional(trade.Quantity, trade.Price)
 	if err != nil {
-		log.Printf("settlement: dropped fill on %s (orders %d/%d, %d @ %d): notional: %v",
-			trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price, err)
-		return
+		return fmt.Errorf("notional: %w", err)
 	}
 
 	if err := service.TradeStore.Settle(ctx, trade, m.Base.Code, m.Quote.Code, quoteAmount); err != nil {
-		log.Printf("settlement: dropped fill on %s (orders %d/%d, %d @ %d): settle: %v",
-			trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price, err)
-		return
+		return fmt.Errorf("settle: %w", err)
 	}
+
+	return nil
 }
 
 // releaseCancelled returns what is left of a cancelled order's lock.
 //
-// Losing the race to a fill is normal rather than an error: the order reached a
-// terminal status first, the book had already matched it, and there is nothing
-// to release. It is logged at all only because the user asked for something
-// that did not happen.
-func (service *TradeService) releaseCancelled(ctx context.Context, cancel models.OrderCancel) {
+// Losing the race to a fill is not a failure: the order reached a terminal
+// status first, the book had already matched it, and there is nothing left to
+// release. The event is finished, so it reports success and the row closes.
+func (service *TradeService) releaseCancelled(ctx context.Context, cancel models.OrderCancel) error {
 
 	m, ok := service.MarketRegistry.BySymbol(cancel.Market)
 	if !ok {
-		log.Printf("settlement: cannot release order %d on unknown market %q",
-			cancel.OrderID, cancel.Market)
-		return
+		return fmt.Errorf("%w: %q", ErrUnknownMarket, cancel.Market)
 	}
 
 	currency, err := m.Locks(cancel.Side)
 	if err != nil {
-		log.Printf("settlement: cannot release order %d: %v", cancel.OrderID, err)
-		return
+		return err
 	}
 
 	err = service.WalletStore.CancelOrder(ctx, cancel.OrderID, currency.Code)
 	if errors.Is(err, stores.ErrNotCancellable) {
 		log.Printf("settlement: order %d filled before its cancellation arrived", cancel.OrderID)
-		return
+		return nil
 	}
-	if err != nil {
-		log.Printf("settlement: could not release order %d on %s: %v",
-			cancel.OrderID, cancel.Market, err)
-		return
-	}
+	return err
 }
 
 // Default and maximum page sizes for the trade feeds. A caller asking for

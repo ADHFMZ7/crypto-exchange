@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // create table users (
 //   id serial primary key
@@ -125,6 +128,16 @@ type LedgerEvent struct {
 	Fill   *Trade
 	Cancel *OrderCancel
 }
+
+// The kinds an event can be, mirroring the ledger_events_kind_valid CHECK.
+const (
+	LedgerFill   = "fill"
+	LedgerCancel = "cancel"
+)
+
+// ErrEmptyLedgerEvent means a LedgerEvent carried neither half of the sum type,
+// or a stored row named a kind this build does not know.
+var ErrEmptyLedgerEvent = errors.New("ledger event carries no effect")
 
 // Fill is one execution, seen from the side of it that a particular user owned.
 //

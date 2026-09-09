@@ -66,13 +66,14 @@ else
 	# loudly if a new table is added and forgotten here. RESTART IDENTITY resets
 	# the id sequences, which keeps order ids small and readable across runs.
 	docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q \
-		-c 'TRUNCATE trades, orders, balances, users RESTART IDENTITY CASCADE;'
+		-c 'TRUNCATE ledger_events, trades, orders, balances, users RESTART IDENTITY CASCADE;'
 fi
 
 docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
 	"SELECT 'users' AS table, count(*) FROM users
 	 UNION ALL SELECT 'orders',   count(*) FROM orders
 	 UNION ALL SELECT 'trades',   count(*) FROM trades
-	 UNION ALL SELECT 'balances', count(*) FROM balances;"
+	 UNION ALL SELECT 'balances', count(*) FROM balances
+	 UNION ALL SELECT 'ledger_events', count(*) FROM ledger_events;"
 
 echo "Database cleared. Restart the API so its order books start empty too."
