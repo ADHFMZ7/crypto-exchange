@@ -41,9 +41,24 @@ func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderSt
 		SChan:      SChan,
 	}
 
+	// Build every book and queue before starting any worker, and keep these two
+	// loops separate.
+	//
+	// A worker's first act is to look its own book up in Orderbooks. Starting
+	// them inside the loop that fills the map means goroutine N reads it while
+	// iteration N+1 writes it — a concurrent map read and write, which Go
+	// detects and may simply panic on. With one market the body ran once and
+	// nothing wrote after the read, which is the only reason this was survivable
+	// before there was a second market to list.
+	//
+	// After this constructor returns, the maps are never written again, so the
+	// workers and every request goroutine can read them without a lock.
 	for _, m := range registry.Markets() {
 		service.Orderbooks[m.Symbol] = orderbook.NewOrderbook()
 		channels[m.Symbol] = make(chan Request, 1024)
+	}
+
+	for _, m := range registry.Markets() {
 		go service.StartWorker(channels[m.Symbol], m.Symbol)
 	}
 
