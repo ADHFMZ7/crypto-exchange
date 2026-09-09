@@ -58,6 +58,15 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 
 		id := orderbook.OrderID(request.OrderID)
 
+		// Reads are served from this goroutine like every write, because it is
+		// the only one that may touch the book. A handler reading the slices
+		// directly would be a data race against an in-flight match.
+		if request.Type == BookDepth {
+			bids, asks := book.Depth(request.Levels)
+			request.Reply <- DepthSnapshot{Market: market, Bids: bids, Asks: asks}
+			continue
+		}
+
 		if request.Type == Cancel {
 			book.Cancel(id)
 			// Published from here, behind any fills this order already
@@ -192,6 +201,7 @@ const (
 	LimitBuy RequestType = iota
 	LimitSell
 	Cancel
+	BookDepth
 )
 
 type Request struct {
@@ -200,6 +210,20 @@ type Request struct {
 	Price   int64
 	Shares  int64
 	Side    string // cancel only: which currency the lock is held in
+
+	// BookDepth only. Reply must be buffered: a caller that gives up waiting
+	// would otherwise leave the worker blocked on a send nobody will receive,
+	// which stops matching for the whole market.
+	Reply  chan DepthSnapshot
+	Levels int
+}
+
+// DepthSnapshot is one book as the worker saw it, taken between two requests so
+// it is never a half-applied match.
+type DepthSnapshot struct {
+	Market string
+	Bids   []orderbook.DepthLevel
+	Asks   []orderbook.DepthLevel
 }
 
 func requestTypeFor(side string) (RequestType, error) {
@@ -265,5 +289,38 @@ func (service *OrderService) CancelOrder(ctx context.Context, userID, orderID in
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// Depth returns the resting bids and asks for one market, best first.
+//
+// The snapshot is taken by the market's own worker, so it is consistent: never
+// a book caught midway through applying a match.
+func (service *OrderService) Depth(ctx context.Context, symbol string, levels int) (DepthSnapshot, error) {
+
+	m, ok := service.Registry.BySymbol(symbol)
+	if !ok {
+		return DepthSnapshot{}, ErrUnknownMarket
+	}
+
+	queue, ok := service.RQueues[m.Symbol]
+	if !ok {
+		return DepthSnapshot{}, ErrUnknownMarket
+	}
+
+	// Buffered, so abandoning the wait below cannot strand the worker on a send.
+	reply := make(chan DepthSnapshot, 1)
+
+	select {
+	case queue <- Request{Type: BookDepth, Reply: reply, Levels: levels}:
+	case <-ctx.Done():
+		return DepthSnapshot{}, ctx.Err()
+	}
+
+	select {
+	case snapshot := <-reply:
+		return snapshot, nil
+	case <-ctx.Done():
+		return DepthSnapshot{}, ctx.Err()
 	}
 }

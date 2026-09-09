@@ -462,3 +462,57 @@ func TestStartWorkerKeepsFillsAheadOfTheCancelThatFollows(t *testing.T) {
 		t.Fatalf("second event = %+v, want the cancellation", events[1])
 	}
 }
+
+// Depth is served from the worker goroutine because it is the only one allowed
+// to touch the book. Run under -race, this also covers that.
+func TestStartWorkerServesDepthRequests(t *testing.T) {
+	service, _, _ := newWorkerService("BTC-USD")
+
+	queue := make(chan Request, 4)
+	queue <- Request{Type: LimitBuy, OrderID: 1, Shares: 100, Price: 2400}
+	queue <- Request{Type: LimitSell, OrderID: 2, Shares: 60, Price: 2600}
+
+	reply := make(chan DepthSnapshot, 1)
+	queue <- Request{Type: BookDepth, Reply: reply, Levels: 0}
+	close(queue)
+
+	service.StartWorker(queue, "BTC-USD")
+
+	snapshot := <-reply
+	if snapshot.Market != "BTC-USD" {
+		t.Fatalf("snapshot market = %q, want BTC-USD", snapshot.Market)
+	}
+	if len(snapshot.Bids) != 1 || snapshot.Bids[0].Price != 2400 || snapshot.Bids[0].Shares != 100 {
+		t.Fatalf("bids = %+v, want 100 at 2400", snapshot.Bids)
+	}
+	if len(snapshot.Asks) != 1 || snapshot.Asks[0].Price != 2600 || snapshot.Asks[0].Shares != 60 {
+		t.Fatalf("asks = %+v, want 60 at 2600", snapshot.Asks)
+	}
+}
+
+func TestDepthRejectsUnknownMarkets(t *testing.T) {
+	service := newTestService(t)
+
+	if _, err := service.Depth(context.Background(), "NOPE-USD", 10); !errors.Is(err, ErrUnknownMarket) {
+		t.Fatalf("Depth err = %v, want ErrUnknownMarket", err)
+	}
+}
+
+// Depth round-trips through a running worker, which is how a handler reaches it.
+func TestDepthReadsThroughTheRunningWorker(t *testing.T) {
+	service := newTestService(t)
+	service.SChan = make(chan models.LedgerEvent, 16)
+
+	go service.StartWorker(service.RQueues["BTC-USD"], "BTC-USD")
+	defer close(service.RQueues["BTC-USD"])
+
+	service.RQueues["BTC-USD"] <- Request{Type: LimitBuy, OrderID: 1, Shares: 100, Price: 2400}
+
+	snapshot, err := service.Depth(context.Background(), "BTC-USD", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Bids) != 1 || snapshot.Bids[0].Shares != 100 {
+		t.Fatalf("bids = %+v, want 100 at 2400", snapshot.Bids)
+	}
+}

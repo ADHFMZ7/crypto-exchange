@@ -116,3 +116,68 @@ func (service *TradeService) releaseCancelled(ctx context.Context, cancel models
 		return
 	}
 }
+
+// Default and maximum page sizes for the trade feeds. A caller asking for
+// nothing sensible gets the default rather than an error, and no caller can ask
+// for an unbounded scan.
+const (
+	DefaultTradeLimit = 50
+	MaxTradeLimit     = 500
+)
+
+// ClampLimit keeps a client-supplied page size inside the bounds above.
+func ClampLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return DefaultTradeLimit
+	case limit > MaxTradeLimit:
+		return MaxTradeLimit
+	default:
+		return limit
+	}
+}
+
+// FillsForUser returns the caller's own executions, newest first.
+func (service *TradeService) FillsForUser(ctx context.Context, userID int64, limit int) (*models.Fills, error) {
+	return service.TradeStore.FillsByUserID(ctx, userID, ClampLimit(limit))
+}
+
+// RecentTrades returns one market's public tape.
+//
+// The symbol is resolved through the registry first so an unknown market is a
+// 404 rather than an empty tape, which would otherwise be indistinguishable
+// from a real market that has never traded.
+func (service *TradeService) RecentTrades(ctx context.Context, symbol string, limit int) (*models.MarketTrades, error) {
+	m, ok := service.MarketRegistry.BySymbol(symbol)
+	if !ok {
+		return nil, ErrUnknownMarket
+	}
+	return service.TradeStore.RecentByMarket(ctx, m.Symbol, ClampLimit(limit))
+}
+
+// TickerWindowHours is the trailing window every ticker is reported over.
+const TickerWindowHours = 24
+
+// Ticker summarises one market over the trailing TickerWindowHours.
+func (service *TradeService) Ticker(ctx context.Context, symbol string) (*models.Ticker, error) {
+	m, ok := service.MarketRegistry.BySymbol(symbol)
+	if !ok {
+		return nil, ErrUnknownMarket
+	}
+	return service.TradeStore.TickerByMarket(ctx, m.Symbol, TickerWindowHours)
+}
+
+// Tickers summarises every listed market, in listing order.
+func (service *TradeService) Tickers(ctx context.Context) ([]models.Ticker, error) {
+	markets := service.MarketRegistry.Markets()
+
+	out := make([]models.Ticker, 0, len(markets))
+	for _, m := range markets {
+		ticker, err := service.TradeStore.TickerByMarket(ctx, m.Symbol, TickerWindowHours)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *ticker)
+	}
+	return out, nil
+}
