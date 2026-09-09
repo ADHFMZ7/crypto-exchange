@@ -2,14 +2,9 @@ package stores
 
 import (
 	"context"
-	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
+	"github.com/ADHFMZ7/crypto-exchange/internal/testsupport"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,10 +18,9 @@ proposed insert row before ON CONFLICT arbitration. An in-memory fake would
 reimplement those in Go and then assert the reimplementation, which proves
 nothing about the code that actually runs.
 
-Set TEST_DATABASE_URL to run them. It must point at a database that can be
-wiped — the schema is dropped and rebuilt from sql/migrations on every run — and
-its name must end in _test, which requireDisposable enforces before anything is
-dropped. Without the variable, every test here skips.
+Set TEST_DATABASE_URL to run them; without it every test here skips. See
+internal/testsupport for what it must point at and why each package gets its
+own schema.
 
 	docker compose -f docker-compose.yml up -d db
 	createdb crypto_exchange_test  # or any other database named *_test
@@ -36,104 +30,26 @@ dropped. Without the variable, every test here skips.
 
 var testPool *pgxpool.Pool
 
-func TestMain(m *testing.M) {
-	databaseURL := os.Getenv("TEST_DATABASE_URL")
-	if databaseURL == "" {
-		// No database configured: every test calls newTestStore, which skips.
-		os.Exit(m.Run())
-	}
-
-	if err := requireDisposable(databaseURL); err != nil {
-		fmt.Fprintf(os.Stderr, "refusing to run: %v\n", err)
-		os.Exit(1)
-	}
-
-	ctx := context.Background()
-
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "TEST_DATABASE_URL is set but unusable: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := rebuildSchema(ctx, pool); err != nil {
-		fmt.Fprintf(os.Stderr, "could not build the test schema: %v\n", err)
-		os.Exit(1)
-	}
-
-	testPool = pool
-	code := m.Run()
-	pool.Close()
-	os.Exit(code)
-}
-
-// requireDisposable refuses a database whose name does not end in _test.
+// newTestStores prepares an empty schema and returns every store over it,
+// skipping the test when no database is configured.
 //
-// The next thing that happens is DROP SCHEMA public CASCADE. The doc comment
-// above warns about that, but a warning is not a guard: pasting the development
-// URL into TEST_DATABASE_URL once is all it takes, and the naming rule costs
-// nothing to follow.
-func requireDisposable(databaseURL string) error {
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		return fmt.Errorf("TEST_DATABASE_URL is not a URL: %w", err)
-	}
+// One entry point rather than a pool a test may read before it is set: the
+// stores are handed out already built, so there is no order to get wrong.
+func newTestStores(t *testing.T) (*TradeStore, *WalletStore, *OutboxStore, *OrderStore) {
+	t.Helper()
 
-	name := strings.TrimPrefix(parsed.Path, "/")
-	if !strings.HasSuffix(name, "_test") {
-		return fmt.Errorf("TEST_DATABASE_URL points at %q, which is not named like a test database. "+
-			"These tests drop and rebuild the whole schema, so the name must end in _test", name)
-	}
-	return nil
+	testPool = testsupport.Pool(t, "stores")
+	testsupport.Truncate(t, testPool)
+
+	return &TradeStore{testPool}, &WalletStore{testPool}, &OutboxStore{testPool}, &OrderStore{testPool}
 }
 
-// rebuildSchema drops everything and replays the migrations in order.
-//
-// Applying the real migration files rather than a hand-written fixture is the
-// point: a test schema that drifts from the one production runs would let a
-// constraint bug pass here and fail there.
-func rebuildSchema(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
-		return err
-	}
-
-	paths, err := filepath.Glob(filepath.Join("..", "..", "sql", "migrations", "*.up.sql"))
-	if err != nil {
-		return err
-	}
-	if len(paths) == 0 {
-		return fmt.Errorf("no migrations found — is the test running from internal/stores?")
-	}
-	sort.Strings(paths) // numeric prefixes make lexical order the right order
-
-	for _, path := range paths {
-		statements, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if _, err := pool.Exec(ctx, string(statements)); err != nil {
-			return fmt.Errorf("%s: %w", filepath.Base(path), err)
-		}
-	}
-	return nil
-}
-
-// newTestStore returns a TradeStore over an empty database, skipping the test
-// when no database is configured.
+// newTestStore is newTestStores for the tests that only want the trade store.
 func newTestStore(t *testing.T) *TradeStore {
 	t.Helper()
 
-	if testPool == nil {
-		t.Skip("TEST_DATABASE_URL not set — skipping database integration test")
-	}
-
-	_, err := testPool.Exec(context.Background(),
-		`TRUNCATE ledger_events, trades, orders, balances, users RESTART IDENTITY CASCADE`)
-	if err != nil {
-		t.Fatalf("could not clear tables: %v", err)
-	}
-
-	return &TradeStore{testPool}
+	trades, _, _, _ := newTestStores(t)
+	return trades
 }
 
 func seedUser(t *testing.T, email string) int64 {

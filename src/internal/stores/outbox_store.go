@@ -3,8 +3,10 @@ package stores
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,6 +19,43 @@ import (
 // permanently, and from nothing worse than a moment's database trouble.
 type OutboxStore struct {
 	pool *pgxpool.Pool
+}
+
+// NoEvent is the event id for work that no recorded event is driving — the
+// startup flush, and tests that exercise an effect directly. Claiming is skipped.
+const NoEvent int64 = 0
+
+// ErrAlreadyApplied means some earlier attempt already resolved this event, so
+// the effect must not be applied a second time.
+var ErrAlreadyApplied = errors.New("ledger event already resolved")
+
+// claimEvent marks an event applied inside the caller's transaction.
+//
+// This is what makes replay exactly-once. Marking an event applied in a
+// separate statement after the effect commits leaves a window: if the mark
+// fails, the row stays owed, the next boot replays it, and the effect lands
+// twice — a second trade row, a second advance of filled_quantity, the money
+// moved again. Taking the mark in the same transaction as the effect closes the
+// window by construction: either both happen or neither does.
+func claimEvent(ctx context.Context, tx pgx.Tx, eventID int64) error {
+	if eventID == NoEvent {
+		return nil
+	}
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE ledger_events
+		SET applied_at = now()
+		WHERE id = $1
+		  AND applied_at IS NULL
+		  AND failed_at IS NULL
+	`, eventID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAlreadyApplied
+	}
+	return nil
 }
 
 // PendingEvent is one recorded effect, still owed to the ledger.
@@ -75,13 +114,6 @@ func (store *OutboxStore) Pending(ctx context.Context, limit int) ([]PendingEven
 	}
 
 	return events, rows.Err()
-}
-
-// MarkApplied closes an event out. The ledger now agrees with the book about it.
-func (store *OutboxStore) MarkApplied(ctx context.Context, id int64) error {
-	_, err := store.pool.Exec(ctx,
-		`UPDATE ledger_events SET applied_at = now() WHERE id = $1 AND applied_at IS NULL`, id)
-	return err
 }
 
 // RecordAttempt notes a failure without giving up on the event.

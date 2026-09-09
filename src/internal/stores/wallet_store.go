@@ -176,12 +176,19 @@ var ErrNotCancellable = errors.New("order is no longer open")
 //
 // This is the mirror of PlaceOrder: that one moves available into locked and
 // opens the order, this one moves whatever is left back and closes it.
-func (store *WalletStore) CancelOrder(ctx context.Context, orderID int64, lockedCurrency string) error {
+func (store *WalletStore) CancelOrder(ctx context.Context, eventID, orderID int64, lockedCurrency string) error {
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) // no-op if already committed
+
+	// Releasing a lock is already idempotent — releaseOrder only touches an
+	// order that is still open — but the event is claimed here anyway so that
+	// exactly-once is one mechanism rather than two arguments.
+	if err := claimEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
 
 	if _, err := releaseOrder(ctx, tx, orderID, lockedCurrency); err != nil {
 		return err

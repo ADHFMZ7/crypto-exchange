@@ -90,15 +90,13 @@ func (service *TradeService) absorb(ctx context.Context, event models.LedgerEven
 // fast as it can.
 func (service *TradeService) applyRecorded(ctx context.Context, id int64, event models.LedgerEvent) {
 	for attempt := 1; ; attempt++ {
-		err := service.apply(ctx, event)
+		err := service.apply(ctx, id, event)
 
-		if err == nil {
-			if err := service.OutboxStore.MarkApplied(ctx, id); err != nil {
-				// Applied but not marked: the replay at next boot will try it
-				// again. Both halves are idempotent against a terminal order,
-				// so a second attempt finds nothing left to do.
-				log.Printf("settlement: event %d applied but not marked: %v", id, err)
-			}
+		// The effect marks its own event applied, in the same transaction, so
+		// there is no window here in which it has landed but still looks owed.
+		// ErrAlreadyApplied means some earlier attempt got there first — the
+		// ledger already reflects this event, which is all that was wanted.
+		if err == nil || errors.Is(err, stores.ErrAlreadyApplied) {
 			return
 		}
 
@@ -117,12 +115,12 @@ func (service *TradeService) applyRecorded(ctx context.Context, id int64, event 
 }
 
 // apply routes an event to the half of the ledger it belongs to.
-func (service *TradeService) apply(ctx context.Context, event models.LedgerEvent) error {
+func (service *TradeService) apply(ctx context.Context, eventID int64, event models.LedgerEvent) error {
 	switch {
 	case event.Fill != nil:
-		return service.settleFill(ctx, *event.Fill)
+		return service.settleFill(ctx, eventID, *event.Fill)
 	case event.Cancel != nil:
-		return service.releaseCancelled(ctx, *event.Cancel)
+		return service.releaseCancelled(ctx, eventID, *event.Cancel)
 	}
 	return models.ErrEmptyLedgerEvent
 }
@@ -209,7 +207,7 @@ func describe(event models.LedgerEvent) string {
 }
 
 // settleFill applies one execution to the ledger.
-func (service *TradeService) settleFill(ctx context.Context, trade models.Trade) error {
+func (service *TradeService) settleFill(ctx context.Context, eventID int64, trade models.Trade) error {
 
 	m, ok := service.MarketRegistry.BySymbol(trade.Market)
 	if !ok {
@@ -221,7 +219,7 @@ func (service *TradeService) settleFill(ctx context.Context, trade models.Trade)
 		return fmt.Errorf("notional: %w", err)
 	}
 
-	if err := service.TradeStore.Settle(ctx, trade, m.Base.Code, m.Quote.Code, quoteAmount); err != nil {
+	if err := service.TradeStore.Settle(ctx, eventID, trade, m.Base.Code, m.Quote.Code, quoteAmount); err != nil {
 		return fmt.Errorf("settle: %w", err)
 	}
 
@@ -233,7 +231,7 @@ func (service *TradeService) settleFill(ctx context.Context, trade models.Trade)
 // Losing the race to a fill is not a failure: the order reached a terminal
 // status first, the book had already matched it, and there is nothing left to
 // release. The event is finished, so it reports success and the row closes.
-func (service *TradeService) releaseCancelled(ctx context.Context, cancel models.OrderCancel) error {
+func (service *TradeService) releaseCancelled(ctx context.Context, eventID int64, cancel models.OrderCancel) error {
 
 	m, ok := service.MarketRegistry.BySymbol(cancel.Market)
 	if !ok {
@@ -245,7 +243,7 @@ func (service *TradeService) releaseCancelled(ctx context.Context, cancel models
 		return err
 	}
 
-	err = service.WalletStore.CancelOrder(ctx, cancel.OrderID, currency.Code)
+	err = service.WalletStore.CancelOrder(ctx, eventID, cancel.OrderID, currency.Code)
 	if errors.Is(err, stores.ErrNotCancellable) {
 		log.Printf("settlement: order %d filled before its cancellation arrived", cancel.OrderID)
 		return nil

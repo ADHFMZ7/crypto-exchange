@@ -50,7 +50,7 @@ func TestSettleReleasesBuyerLockWhenBalanceRowAlreadyExists(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, fiftyDollars, fiftyDollars)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
-	err := store.Settle(context.Background(),
+	err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, fiftyDollars),
 		"BTC", "USD", fiftyDollars)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestSettleFullFillMovesBothSides(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, fiftyDollars, fiftyDollars)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
-	if err := store.Settle(context.Background(),
+	if err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, fiftyDollars),
 		"BTC", "USD", fiftyDollars); err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestSettleCreatesBalanceRowForACurrencyNeverHeld(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, fiftyDollars, fiftyDollars)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
-	if err := store.Settle(context.Background(),
+	if err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, fiftyDollars),
 		"BTC", "USD", fiftyDollars); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestSettlePartialFillLeavesOrdersOpen(t *testing.T) {
 	half := oneBTC / 2
 	halfCost := fiftyDollars / 2
 
-	if err := store.Settle(context.Background(),
+	if err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", half, fiftyDollars),
 		"BTC", "USD", halfCost); err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestSettleRefundsPriceImprovementOnTheFinalFill(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, buyerLimit, buyerLimit)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, executionPrice, oneBTC)
 
-	if err := store.Settle(context.Background(),
+	if err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, executionPrice),
 		"BTC", "USD", executionPrice); err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestSettleConservesValue(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, fiftyDollars, fiftyDollars)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
-	if err := store.Settle(context.Background(),
+	if err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, fiftyDollars),
 		"BTC", "USD", fiftyDollars); err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestSettleRollsBackEverythingOnFailure(t *testing.T) {
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
 	// Twice the order quantity.
-	err := store.Settle(context.Background(),
+	err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC*2, fiftyDollars),
 		"BTC", "USD", fiftyDollars*2)
 	if err == nil {
@@ -294,7 +294,7 @@ func TestSettleRejectsDebitOfAMissingBalance(t *testing.T) {
 	buyOrder := seedOrder(t, buyer, "buy", oneBTC, fiftyDollars, fiftyDollars)
 	sellOrder := seedOrder(t, seller, "sell", oneBTC, fiftyDollars, oneBTC)
 
-	err := store.Settle(context.Background(),
+	err := store.Settle(context.Background(), NoEvent,
 		trade(sellOrder, buyOrder, "buy", oneBTC, fiftyDollars),
 		"BTC", "USD", fiftyDollars)
 	if !errors.Is(err, ErrNoBalance) {

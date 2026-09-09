@@ -88,8 +88,7 @@ func seedRestartState(t *testing.T) (buyer, seller int64, orders []OrderRelease)
 }
 
 func TestCancelRestingOrdersLeavesNothingLocked(t *testing.T) {
-	newTestStore(t)
-	store := &WalletStore{testPool}
+	_, store, _, _ := newTestStores(t)
 
 	_, _, releases := seedRestartState(t)
 
@@ -129,8 +128,7 @@ func TestCancelRestingOrdersLeavesNothingLocked(t *testing.T) {
 // Nothing about a terminal order changes: its lock was already resolved, and
 // releasing it again would be inventing money.
 func TestCancelRestingOrdersLeavesTerminalOrdersAlone(t *testing.T) {
-	newTestStore(t)
-	store := &WalletStore{testPool}
+	_, store, _, _ := newTestStores(t)
 
 	user := seedUser(t, "trader@test")
 	seedBalance(t, user, "USD", fiftyDollars, 0)
@@ -163,8 +161,7 @@ func TestCancelRestingOrdersLeavesTerminalOrdersAlone(t *testing.T) {
 
 // A crash during startup must not make the flush unsafe to run again.
 func TestCancelRestingOrdersIsIdempotent(t *testing.T) {
-	newTestStore(t)
-	store := &WalletStore{testPool}
+	_, store, _, _ := newTestStores(t)
 
 	_, _, releases := seedRestartState(t)
 
@@ -189,8 +186,7 @@ func TestCancelRestingOrdersIsIdempotent(t *testing.T) {
 }
 
 func TestCancelRestingOrdersOnAnEmptyExchange(t *testing.T) {
-	newTestStore(t)
-	store := &WalletStore{testPool}
+	_, store, _, _ := newTestStores(t)
 
 	freed, err := store.CancelRestingOrders(context.Background(), nil)
 	if err != nil {
