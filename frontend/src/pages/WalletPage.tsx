@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { SourcedPanel } from "../components/DataSource";
 import { useAuth } from "../hooks/useAuth";
+import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { parseAmountRounded, toAmount } from "../lib/decimal";
@@ -20,27 +21,31 @@ export const WalletPage: React.FC = () => {
   const [transferError, setTransferError] = useState<string>();
   const [transferNote, setTransferNote] = useState<string>();
 
-  const loadWallet = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    setError(undefined);
-    try {
-      const wallet = await api.getWallet(token);
-      setBalances(wallet.balances ?? []);
-    } catch (err) {
-      if (err instanceof ApiError && err.isUnauthorized) {
-        logout();
-        return;
+  // Balances move without the user doing anything now: settlement shifts funds
+  // between locked and available as orders fill. `silent` keeps a background
+  // poll from flickering the button.
+  const loadWallet = useCallback(
+    async (silent = false) => {
+      if (!token) return;
+      if (!silent) setLoading(true);
+      try {
+        const wallet = await api.getWallet(token);
+        setBalances(wallet.balances ?? []);
+        setError(undefined);
+      } catch (err) {
+        if (err instanceof ApiError && err.isUnauthorized) {
+          logout();
+          return;
+        }
+        setError(errorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
       }
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [logout, token]);
+    },
+    [logout, token]
+  );
 
-  useEffect(() => {
-    loadWallet();
-  }, [loadWallet]);
+  usePolling(() => loadWallet(true), 6000, Boolean(token));
 
   // Whole units are a display convention that exists in this input and nowhere
   // else. The typed string is parsed directly — Number("0.1") * 100 is
@@ -91,9 +96,14 @@ export const WalletPage: React.FC = () => {
         title="Balances"
         kind="live"
         endpoint="GET /wallets/me"
-        note="Every figure below is read from the database on page load."
+        note="Read from the database, and refreshed on a timer — settlement moves funds between locked and available as orders fill."
         actions={
-          <button type="button" className="ghost-button" onClick={loadWallet} disabled={loading}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => loadWallet()}
+            disabled={loading}
+          >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         }
@@ -141,11 +151,11 @@ export const WalletPage: React.FC = () => {
           </table>
         )}
 
-        {totalLocked === 0n && balances.length > 0 && (
+        {totalLocked > 0n && (
           <div className="muted" style={{ marginTop: 10 }}>
-            Locked reads 0 for every currency. <code>GetByUserID</code> selects only{" "}
-            <code>available</code>, so this column cannot show a non-zero value until the query
-            includes <code>locked</code>.
+            Locked funds are committed to open orders. Settlement releases them as fills execute —
+            the spent portion moves to the counterparty, and anything locked above what the trade
+            actually cost returns to available when the order completes.
           </div>
         )}
       </SourcedPanel>

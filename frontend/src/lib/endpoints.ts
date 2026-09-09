@@ -80,6 +80,14 @@ export const ENDPOINTS: EndpointStatus[] = [
   },
   {
     method: "GET",
+    path: "/trades",
+    state: "mock",
+    purpose: "Executions against this user's orders, with counterparty price and time",
+    workaround:
+      "Orders page shows aggregate fill progress from filled_quantity — the individual executions behind it are recorded but not served"
+  },
+  {
+    method: "GET",
     path: "/markets/{symbol}/ticker",
     state: "mock",
     purpose: "Quote board — last price, 24h change, volume",

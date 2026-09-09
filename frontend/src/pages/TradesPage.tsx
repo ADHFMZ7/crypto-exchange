@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
 import { IntegrationStatus } from "../components/IntegrationStatus";
 import { MarketTable } from "../components/MarketTable";
 import { useAuth } from "../hooks/useAuth";
+import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { fillFraction, formatOrderLegs } from "../lib/markets";
@@ -31,27 +32,31 @@ export const TradesPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
 
-  const loadOrders = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    setError(undefined);
-    try {
-      const res = await api.getOrders(token);
-      setOrders(res.orders ?? []);
-    } catch (err) {
-      if (err instanceof ApiError && err.isUnauthorized) {
-        logout();
-        return;
+  // `silent` distinguishes a background poll from the Refresh button. Without
+  // it the button would flicker into its loading state every few seconds and
+  // stop meaning anything.
+  const loadOrders = useCallback(
+    async (silent = false) => {
+      if (!token) return;
+      if (!silent) setLoading(true);
+      try {
+        const res = await api.getOrders(token);
+        setOrders(res.orders ?? []);
+        setError(undefined);
+      } catch (err) {
+        if (err instanceof ApiError && err.isUnauthorized) {
+          logout();
+          return;
+        }
+        setError(errorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
       }
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [logout, token]);
+    },
+    [logout, token]
+  );
 
-  useEffect(() => {
-    loadOrders();
-  }, [loadOrders]);
+  usePolling(() => loadOrders(true), 4000, Boolean(token));
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -63,15 +68,25 @@ export const TradesPage: React.FC = () => {
         note={
           <>
             Read from the database, newest first — not from this browser. Fill progress comes from{" "}
-            <code>filled_quantity</code>, which stays at zero until the matching engine reports
-            executions, so everything currently rests as <strong>open</strong>. That is accurate
-            rather than unknown: nothing can fill yet.
+            <code>filled_quantity</code>, which settlement advances in the same transaction that
+            records the trade. Matching happens after the <strong>202</strong>, so this refreshes
+            every few seconds rather than waiting for you.
           </>
         }
         actions={
-          <button type="button" className="ghost-button" onClick={loadOrders} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          <div className="inline-actions" style={{ gap: 10, alignItems: "center" }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              auto-refreshing
+            </span>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => loadOrders()}
+              disabled={loading}
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         }
       >
         {error && <div className="pill status-danger">{error}</div>}
@@ -107,9 +122,29 @@ export const TradesPage: React.FC = () => {
                       {order.side}
                     </td>
                     <td style={{ textAlign: "right" }}>{legs.quantity}</td>
-                    <td style={{ textAlign: "right" }} className={filled ? undefined : "muted"}>
-                      {legs.filled}
+                    <td style={{ textAlign: "right" }}>
+                      <span className={filled ? undefined : "muted"}>{legs.filled}</span>
                       <span className="muted"> ({Math.round(filled * 100)}%)</span>
+                      {filled > 0 && (
+                        <div
+                          aria-hidden
+                          style={{
+                            height: 3,
+                            marginTop: 4,
+                            borderRadius: 2,
+                            background: "var(--border)",
+                            overflow: "hidden"
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${Math.min(100, Math.round(filled * 100))}%`,
+                              height: "100%",
+                              background: filled >= 1 ? "var(--success)" : "var(--accent)"
+                            }}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td style={{ textAlign: "right" }}>{legs.price}</td>
                     <td>

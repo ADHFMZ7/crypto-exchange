@@ -32,8 +32,11 @@ export type Side = "buy" | "sell";
 /**
  * Order lifecycle, mirroring the orders_status_valid CHECK in migration 000003.
  *
- * `partially_filled` cannot occur until the matching engine reports fills, so
- * everything currently reads `open` — which is accurate, not a placeholder.
+ * Settlement derives this from `filled_quantity` rather than setting it
+ * independently, so the two can never disagree. An order reaches
+ * `partially_filled` or `filled` without the client doing anything — matching
+ * happens after the 202, so poll rather than assuming a fetched value is still
+ * current.
  */
 export type OrderStatus = "open" | "partially_filled" | "filled" | "cancelled";
 
