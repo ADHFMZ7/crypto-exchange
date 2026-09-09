@@ -1,107 +1,43 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE } from "../lib/api";
-import type { MarketTrade } from "../types";
+import { subscribe, type StreamEvent, type StreamStatus } from "../lib/stream";
+import type { MarketTrade, OrderbookSnapshot } from "../types";
+
+export type { StreamStatus } from "../lib/stream";
+
+type Handlers = {
+  /** A trade that has settled. Append it. */
+  onTrade?: (trade: MarketTrade) => void;
+  /** The book as it now stands. Replace what you have — it is not a diff. */
+  onDepth?: (book: OrderbookSnapshot) => void;
+  /** Fires on every connect, including reconnects. Re-read the REST snapshot. */
+  onResync?: () => void;
+};
 
 /**
- * The live execution feed.
+ * Subscribe a component to a market's live feed.
  *
- * Polling asked "has anything happened?" several times a second and was told no
- * almost every time. This is told once, when something does.
- *
- * A stream only carries what happens after you connect, so it cannot be the
- * whole story: the caller still reads the REST tape for the state before that.
- * `onResync` fires on every connect, including reconnects, because the gap
- * while disconnected is exactly the window the stream cannot fill.
+ * Callbacks are held in a ref so a caller can pass inline functions without
+ * resubscribing on every render — the connection depends on the symbol alone.
  */
-
-export type StreamStatus = "connecting" | "live" | "offline";
-
-/** Backoff between reconnects, capped. The server is on the same machine in
- *  development, so the first retry is quick and the ceiling is what matters. */
-const RETRY_MS = [500, 1000, 2000, 5000, 10_000];
-
-function streamURL(symbol: string): string {
-  const base = API_BASE.replace(/^http/, "ws");
-  return `${base}/stream?markets=${encodeURIComponent(symbol)}`;
-}
-
-export function useMarketStream(
-  symbol: string | undefined,
-  onTrade: (trade: MarketTrade) => void,
-  onResync: () => void
-): StreamStatus {
+export function useMarketStream(symbol: string | undefined, handlers: Handlers): StreamStatus {
   const [status, setStatus] = useState<StreamStatus>("connecting");
 
-  // Held in refs so a caller can pass inline functions without tearing the
-  // connection down and rebuilding it on every render.
-  const trade = useRef(onTrade);
-  const resync = useRef(onResync);
+  const latest = useRef(handlers);
   useEffect(() => {
-    trade.current = onTrade;
-    resync.current = onResync;
-  }, [onResync, onTrade]);
+    latest.current = handlers;
+  });
 
   useEffect(() => {
     if (!symbol) return;
 
-    let socket: WebSocket | undefined;
-    let retry: number | undefined;
-    let attempt = 0;
-    let abandoned = false;
-
-    const connect = () => {
-      if (abandoned) return;
-      setStatus((prev) => (prev === "live" ? "connecting" : prev));
-
-      socket = new WebSocket(streamURL(symbol));
-
-      socket.onopen = () => {
-        attempt = 0;
-        setStatus("live");
-        // Whatever happened while disconnected is not on this connection.
-        resync.current();
-      };
-
-      socket.onmessage = (message) => {
-        try {
-          const event = JSON.parse(message.data as string);
-          if (event?.type === "trade" && event.payload) {
-            trade.current(event.payload as MarketTrade);
-          }
-        } catch {
-          // A frame we cannot read is not worth dropping the connection over.
-        }
-      };
-
-      socket.onclose = () => {
-        if (abandoned) return;
-        setStatus("offline");
-        // The server closes with TryAgainLater when a client has fallen behind,
-        // and the browser closes on a dropped network. Both want the same thing.
-        const wait = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
-        attempt += 1;
-        retry = window.setTimeout(connect, wait);
-      };
-
-      // onerror is always followed by onclose, which owns the retry.
-      socket.onerror = () => setStatus("offline");
-    };
-
-    connect();
-
-    return () => {
-      abandoned = true;
-      window.clearTimeout(retry);
-      // Detach the handlers first: closing fires onclose, which would otherwise
-      // schedule a reconnect for a component that is going away.
-      if (socket) {
-        socket.onopen = null;
-        socket.onmessage = null;
-        socket.onclose = null;
-        socket.onerror = null;
-        socket.close();
+    return subscribe(symbol, {
+      onStatus: setStatus,
+      onResync: () => latest.current.onResync?.(),
+      onEvent: (event: StreamEvent) => {
+        if (event.type === "trade") latest.current.onTrade?.(event.payload);
+        if (event.type === "depth") latest.current.onDepth?.(event.payload);
       }
-    };
+    });
   }, [symbol]);
 
   return status;

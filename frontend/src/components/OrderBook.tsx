@@ -1,5 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { SourcedPanel } from "./DataSource";
+import { StreamBadge } from "./StreamBadge";
+import { useMarketStream } from "../hooks/useMarketStream";
 import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { api, errorMessage } from "../lib/api";
@@ -47,7 +49,33 @@ export const OrderBook: React.FC<Props> = ({ symbol, onSnapshot }) => {
     }
   }, [onSnapshot, symbol]);
 
-  usePolling(load, 2500, Boolean(symbol));
+  /*
+   * Depth arrives pushed rather than asked for.
+   *
+   * A book snapshot replaces what is on screen rather than being merged into
+   * it: the server sends the whole book, not a diff, so there is no sequence
+   * number to track and no way for the client's copy to drift from the
+   * engine's. That is worth the extra bytes at this size.
+   *
+   * The engine announces on a timer while the book is changing, so a burst of
+   * orders costs a few snapshots rather than one per order.
+   */
+  const status = useMarketStream(symbol, {
+    // The feed broadcasts a generous depth because one message serves every
+    // client, and each of them wants a different amount. Trimming here is what
+    // keeps the streamed book identical to the one REST returns.
+    onDepth: (book) =>
+      setBook({
+        ...book,
+        bids: book.bids.slice(0, LEVELS),
+        asks: book.asks.slice(0, LEVELS)
+      }),
+    onResync: load
+  });
+
+  // Only while the feed is down. A book that has silently stopped updating
+  // looks exactly like a quiet market, and acting on a stale one loses money.
+  usePolling(load, 3000, Boolean(symbol) && status !== "live");
 
   const bids = book?.bids ?? [];
   const asks = book?.asks ?? [];
@@ -92,10 +120,12 @@ export const OrderBook: React.FC<Props> = ({ symbol, onSnapshot }) => {
       kind="live"
       endpoint="GET /orderbook/{symbol}"
       fill
+      actions={<StreamBadge status={status} />}
       note={<>Offers waiting to be traded against. Sellers above, buyers below.</>}
       devNote={
         <>
-          Read from the matching engine's memory, not from Postgres. Cancelled orders are excluded
+          Read from the matching engine's memory, not from Postgres — the worker that owns each book
+          announces it, so a snapshot is never a half-applied match. Cancelled orders are excluded
           before the engine evicts them.
         </>
       }

@@ -84,12 +84,11 @@ export const HomePage: React.FC = () => {
 
   // The chart is the same executions the tape shows, so it takes the same feed.
   // The snapshot is REST; everything after arrives pushed.
-  const streamStatus = useMarketStream(
-    selectedSymbol,
-    (trade) =>
+  const streamStatus = useMarketStream(selectedSymbol, {
+    onTrade: (trade) =>
       setTape((prev) => (prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev].slice(0, 60))),
-    loadTape
-  );
+    onResync: loadTape
+  });
 
   usePolling(loadTape, 8000, Boolean(selectedSymbol) && streamStatus !== "live");
 

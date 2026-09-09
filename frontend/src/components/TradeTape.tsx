@@ -53,14 +53,13 @@ export const TradeTape: React.FC<Props> = ({ symbol }) => {
    * Deduplicated by id because those two sources overlap: a trade can arrive on
    * the feed and then appear again in the snapshot that follows a reconnect.
    */
-  const status = useMarketStream(
-    symbol,
-    (trade) =>
+  const status = useMarketStream(symbol, {
+    onTrade: (trade) =>
       setTrades((prev) =>
         prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev].slice(0, TRADES)
       ),
-    load
-  );
+    onResync: load
+  });
 
   // Only while the feed is down. Falling back to asking is better than showing
   // a tape that has quietly stopped moving.
