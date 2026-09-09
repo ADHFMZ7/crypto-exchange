@@ -18,6 +18,30 @@ jobs:
     defaults:
       run:
         working-directory: src
+
+    # The settlement tests assert on constraints and statement semantics that
+    # only Postgres has — balances_non_negative, orders_filled_within_quantity,
+    # and the rule that a CHECK is evaluated before ON CONFLICT arbitration.
+    # Faking those would test a Go reimplementation of Postgres, so CI runs the
+    # real thing. Without this service they silently skip.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: crypto_exchange_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/crypto_exchange_test?sslmode=disable
+
     steps:
       - uses: actions/checkout@v4
 
