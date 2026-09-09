@@ -13,7 +13,7 @@ type Services struct {
 	Orders  *OrderService
 }
 
-func NewServices(stores *stores.Stores, registry *market.Registry, SChan chan models.Trade) *Services {
+func NewServices(stores *stores.Stores, registry *market.Registry, SChan chan models.LedgerEvent) *Services {
 
 	return &Services{
 		Users:   NewUserService(stores.Users),

@@ -2,8 +2,10 @@ package stores
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,4 +59,42 @@ func (store *OrderStore) GetByUserID(ctx context.Context, userID int64) (*models
 	}
 
 	return &orders, nil
+}
+
+// ErrOrderNotFound covers both "no such order" and "not this user's order".
+//
+// The two are deliberately indistinguishable to a caller: telling them apart
+// would let anyone probe which order ids exist by watching the status code
+// change.
+var ErrOrderNotFound = errors.New("order not found")
+
+// GetByIDForUser returns one order, but only to the user who placed it.
+//
+// Ownership is part of the WHERE clause rather than checked after the read, so
+// there is no window in which a caller holds another user's order at all.
+func (store *OrderStore) GetByIDForUser(ctx context.Context, orderID, userID int64) (*models.Order, error) {
+	var order models.Order
+
+	err := store.pool.QueryRow(ctx, `
+		SELECT id, market, side, quantity, filled_quantity, price_each, status, created_at
+		FROM orders
+		WHERE id = $1 AND user_id = $2
+	`, orderID, userID).Scan(
+		&order.ID,
+		&order.Market,
+		&order.Side,
+		&order.Quantity,
+		&order.FilledQuantity,
+		&order.PriceEach,
+		&order.Status,
+		&order.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOrderNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &order, nil
 }

@@ -20,10 +20,10 @@ type OrderService struct {
 
 	Orderbooks map[string]*orderbook.Orderbook
 	RQueues    map[string]chan Request
-	SChan      chan models.Trade
+	SChan      chan models.LedgerEvent
 }
 
-func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry, SChan chan models.Trade) *OrderService {
+func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry, SChan chan models.LedgerEvent) *OrderService {
 
 	channels := map[string]chan Request{}
 
@@ -60,6 +60,14 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 
 		if request.Type == Cancel {
 			book.Cancel(id)
+			// Published from here, behind any fills this order already
+			// produced, so the ledger releases what is left of the lock and
+			// not what an earlier fill still owed.
+			service.SChan <- models.LedgerEvent{Cancel: &models.OrderCancel{
+				Market:  market,
+				OrderID: request.OrderID,
+				Side:    request.Side,
+			}}
 			continue
 		}
 
@@ -90,7 +98,7 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 				ExecutionTime:   trade.ExecutionTime,
 			}
 
-			service.SChan <- trade_model
+			service.SChan <- models.LedgerEvent{Fill: &trade_model}
 		}
 
 	}
@@ -191,6 +199,7 @@ type Request struct {
 	OrderID int64
 	Price   int64
 	Shares  int64
+	Side    string // cancel only: which currency the lock is held in
 }
 
 func requestTypeFor(side string) (RequestType, error) {
@@ -215,3 +224,46 @@ func requestTypeFor(side string) (RequestType, error) {
 // 		return LimitBuy, false
 // 	}
 // }
+
+// Errors the order path returns that a handler needs to tell apart, because
+// each maps to a different status code.
+var (
+	ErrUnknownMarket       = errors.New("unknown market")
+	ErrOrderNotFound       = errors.New("order not found")
+	ErrOrderNotCancellable = errors.New("order is no longer open")
+)
+
+// CancelOrder asks the book to stop matching one of the caller's orders.
+//
+// Ownership and status are checked here, against the ledger, so a caller cannot
+// cancel an order that is not theirs. Both are advisory by the time the worker
+// acts on the request: an order can fill in the gap, and then the cancellation
+// simply loses. That race is settled in one place — the conditional UPDATE in
+// WalletStore.CancelOrder — rather than guessed at here.
+//
+// Returns once the request is queued, not once the book has acted. Cancellation
+// is as asynchronous as placement, and for the same reason: the worker owns the
+// book, and blocking an HTTP handler on its queue depth helps nobody.
+func (service *OrderService) CancelOrder(ctx context.Context, userID, orderID int64) error {
+
+	order, err := service.OrderStore.GetByIDForUser(ctx, orderID, userID)
+	if err != nil {
+		return err
+	}
+
+	if order.Status != models.OrderOpen && order.Status != models.OrderPartiallyFilled {
+		return ErrOrderNotCancellable
+	}
+
+	queue, ok := service.RQueues[order.Market]
+	if !ok {
+		return ErrUnknownMarket
+	}
+
+	select {
+	case queue <- Request{Type: Cancel, OrderID: orderID, Side: order.Side}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}

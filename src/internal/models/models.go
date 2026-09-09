@@ -103,3 +103,25 @@ type Trade struct {
 
 	ExecutionTime time.Time `json:"execution_time"`
 }
+
+// OrderCancel is an order the book has stopped matching, whose unspent lock the
+// ledger still has to return.
+type OrderCancel struct {
+	Market  string `json:"market"`
+	OrderID int64  `json:"order_id"`
+	Side    string `json:"side"`
+}
+
+// LedgerEvent is one thing the book has done that the ledger must record.
+// Exactly one field is set.
+//
+// Fills and cancellations share a channel because their relative order matters.
+// A cancellation that overtook a fill of the same order would release a lock the
+// fill still needs, and the fill would then fail against
+// orders_locked_remaining_non_negative — the book would have traded and the
+// ledger would not agree. One queue, applied in the order the book produced
+// them, makes that unrepresentable.
+type LedgerEvent struct {
+	Fill   *Trade
+	Cancel *OrderCancel
+}

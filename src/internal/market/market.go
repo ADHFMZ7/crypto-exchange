@@ -52,6 +52,21 @@ func (m *Market) FillNotional(quantity, price int64) (int64, error) {
 	return m.notional(quantity, price, roundUp)
 }
 
+// Locks reports which currency a side's funds are held in while an order rests.
+//
+// A buy locks quote to pay with, a sell locks the base it is selling. Releasing
+// a cancelled order needs this without knowing the amount, which is why it is
+// separate from Spends rather than read off it.
+func (m *Market) Locks(side string) (Currency, error) {
+	switch side {
+	case "buy":
+		return m.Quote, nil
+	case "sell":
+		return m.Base, nil
+	}
+	return Currency{}, ErrInvalidSide
+}
+
 // Spends reports the currency debited and the amount to lock.
 func (m *Market) Spends(side string, quantity int64, price int64) (Currency, int64, error) {
 

@@ -213,9 +213,9 @@ func TestCreateOrderRejectsMarketWithNoQueue(t *testing.T) {
 // The channel must be buffered past anything the test enqueues. StartWorker
 // publishes each fill before it takes the next request, so with nothing draining
 // the other end a full channel blocks the worker — and the test — forever.
-func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook, chan models.Trade) {
+func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook, chan models.LedgerEvent) {
 	book := orderbook.NewOrderbook()
-	settlements := make(chan models.Trade, 16)
+	settlements := make(chan models.LedgerEvent, 16)
 	return &OrderService{
 		Orderbooks: map[string]*orderbook.Orderbook{symbol: book},
 		SChan:      settlements,
@@ -224,14 +224,14 @@ func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook, chan 
 
 // drainSettlements closes the channel and collects everything on it. Safe only
 // once StartWorker has returned, which means it has no more fills to publish.
-func drainSettlements(settlements chan models.Trade) []models.Trade {
+func drainSettlements(settlements chan models.LedgerEvent) []models.LedgerEvent {
 	close(settlements)
 
-	var fills []models.Trade
-	for fill := range settlements {
-		fills = append(fills, fill)
+	var events []models.LedgerEvent
+	for event := range settlements {
+		events = append(events, event)
 	}
-	return fills
+	return events
 }
 
 func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
@@ -267,12 +267,15 @@ func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
 
 	// The crossing has to reach settlement, or the book has moved and the
 	// ledger will never hear about it.
-	fills := drainSettlements(settlements)
-	if len(fills) != 1 {
-		t.Fatalf("published %d fills, want 1", len(fills))
+	events := drainSettlements(settlements)
+	if len(events) != 1 {
+		t.Fatalf("published %d events, want 1", len(events))
+	}
+	if events[0].Fill == nil {
+		t.Fatalf("published %+v, want a fill", events[0])
 	}
 
-	fill := fills[0]
+	fill := *events[0].Fill
 	if fill.Market != "BTC-USD" {
 		t.Errorf("fill market = %q, want BTC-USD", fill.Market)
 	}
@@ -331,7 +334,7 @@ func TestMarketsDoNotShareABook(t *testing.T) {
 			"BTC-USD": btcBook,
 			"ETH-USD": ethBook,
 		},
-		SChan: make(chan models.Trade, 16),
+		SChan: make(chan models.LedgerEvent, 16),
 	}
 
 	btcQueue := make(chan Request, 2)
@@ -401,5 +404,61 @@ func TestStartWorkerReturnsWhenChannelCloses(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("StartWorker did not return after its channel closed: goroutine leaked")
+	}
+}
+
+// A cancellation must reach the ledger, or the order stops matching in memory
+// while its funds stay locked in Postgres forever.
+func TestStartWorkerPublishesCancellations(t *testing.T) {
+	service, book, settlements := newWorkerService("BTC-USD")
+
+	queue := make(chan Request, 4)
+	queue <- Request{Type: LimitSell, OrderID: 7, Shares: 100, Price: 2400}
+	queue <- Request{Type: Cancel, OrderID: 7, Side: "sell"}
+	close(queue)
+
+	service.StartWorker(queue, "BTC-USD")
+
+	events := drainSettlements(settlements)
+	if len(events) != 1 {
+		t.Fatalf("published %d events, want 1", len(events))
+	}
+	cancel := events[0].Cancel
+	if cancel == nil {
+		t.Fatalf("published %+v, want a cancellation", events[0])
+	}
+	if cancel.OrderID != 7 || cancel.Market != "BTC-USD" || cancel.Side != "sell" {
+		t.Fatalf("cancellation = %+v, want order 7, BTC-USD, sell", *cancel)
+	}
+
+	// The side is what tells the ledger which currency to give back, so it has
+	// to survive the trip rather than be re-derived downstream.
+	if _, asks := book.Depth(0); len(asks) != 0 {
+		t.Fatalf("asks = %+v, want the cancelled order gone from depth", asks)
+	}
+}
+
+// Fills and cancellations share a queue so they stay ordered. A cancellation
+// that overtook its own fill would release a lock the fill still needs.
+func TestStartWorkerKeepsFillsAheadOfTheCancelThatFollows(t *testing.T) {
+	service, _, settlements := newWorkerService("BTC-USD")
+
+	queue := make(chan Request, 8)
+	queue <- Request{Type: LimitSell, OrderID: 1, Shares: 100, Price: 2400}
+	queue <- Request{Type: LimitBuy, OrderID: 2, Shares: 40, Price: 2500} // fills 40
+	queue <- Request{Type: Cancel, OrderID: 1, Side: "sell"}              // cancels the rest
+	close(queue)
+
+	service.StartWorker(queue, "BTC-USD")
+
+	events := drainSettlements(settlements)
+	if len(events) != 2 {
+		t.Fatalf("published %d events, want 2", len(events))
+	}
+	if events[0].Fill == nil {
+		t.Fatalf("first event = %+v, want the fill", events[0])
+	}
+	if events[1].Cancel == nil {
+		t.Fatalf("second event = %+v, want the cancellation", events[1])
 	}
 }
