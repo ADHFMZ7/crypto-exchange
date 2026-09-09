@@ -55,6 +55,7 @@ the concurrency lives. After a run, these should all hold:
 
 import argparse
 import json
+import math
 import random
 import sys
 import time
@@ -198,8 +199,15 @@ class Simulation:
         # simulation derives is an integer offset from this.
         self.fair = args.price * 10 ** quote_exp
         self.momentum = 0
-        self.tick = max(1, 10 ** quote_exp)        # quote to the whole unit
-        self.lot = 10 ** max(0, base_exp - 3)      # and size to a thousandth of one
+        # The tick scales with the price rather than being one whole quote unit.
+        # A $1 tick is fine on a $50,000 asset and larger than the entire spread
+        # on a $150 one. Rounding to a power of ten keeps prices readable, and
+        # at $50,000 it lands back on exactly $1.
+        reference = args.price * 10 ** quote_exp
+        raw = max(1, reference // 50_000)
+        self.tick = 10 ** int(math.log10(raw))
+
+        self.lot = 10 ** max(0, base_exp - 3)      # size to a thousandth of a whole unit
 
         # Makers quote on a coarser grid than the tick. Quotes in a real book
         # cluster on round numbers, which is why levels hold several orders
@@ -383,7 +391,7 @@ class Simulation:
         # the touch needs somewhere to keep filling, and the depth chart needs
         # more than one rung to be worth drawing.
         for rung in range(self.args.ladder):
-            step = half + rung * self.rng.randint(self.tick, self.args.spread)
+            step = half + rung * self.rng.randint(self.tick, max(self.tick, self.args.spread))
 
             bid = self.round_grid(centre - step)
             ask = self.round_grid(centre + step) + self.grid
@@ -566,16 +574,16 @@ def main():
     parser.add_argument("--retail", type=int, default=3, help="small noise accounts")
 
     parser.add_argument("--price", type=int, default=50_000, help="starting price, in WHOLE quote units")
-    parser.add_argument("--vol", type=int, default=4_000, help="per-step noise, in quote minor units")
-    parser.add_argument("--trend", type=int, default=2_500, help="drift magnitude, in quote minor units")
-    parser.add_argument("--spread", type=int, default=12_000, help="maker spread, in quote minor units")
-    parser.add_argument("--requote", type=int, default=9_000, help="price move that triggers a requote")
+    parser.add_argument("--vol", type=int, default=None, help="per-step noise, in quote minor units")
+    parser.add_argument("--trend", type=int, default=None, help="drift magnitude, in quote minor units")
+    parser.add_argument("--spread", type=int, default=None, help="maker spread, in quote minor units")
+    parser.add_argument("--requote", type=int, default=None, help="price move that triggers a requote")
     parser.add_argument("--ladder", type=int, default=3, help="price levels a maker quotes per side")
     parser.add_argument("--grid", type=int, default=25, help="maker quotes round to this many ticks")
 
-    parser.add_argument("--quote-size", type=int, default=SATOSHI // 2, help="maker size, in base minor units")
-    parser.add_argument("--take-size", type=int, default=SATOSHI // 4, help="taker size, in base minor units")
-    parser.add_argument("--retail-size", type=int, default=SATOSHI // 12, help="retail size, in base minor units")
+    parser.add_argument("--quote-size", type=int, default=None, help="maker size, in base minor units")
+    parser.add_argument("--take-size", type=int, default=None, help="taker size, in base minor units")
+    parser.add_argument("--retail-size", type=int, default=None, help="retail size, in base minor units")
     parser.add_argument("--inventory", type=int, default=40, help="maker's target base holding, in WHOLE units")
 
     args = parser.parse_args()
@@ -595,6 +603,25 @@ def main():
         raise SystemExit(f"No market {args.market!r}. Listed: {listed}")
 
     exponents = {c["code"]: c["exponent"] for c in api.currencies()}
+
+    # Order sizes default to a fraction of one WHOLE base unit, not to a fixed
+    # number of satoshis. SOL holds nine decimals where BTC holds eight, so a
+    # hardcoded 1e8 is half a bitcoin on one market and a twentieth of a Solana
+    # on the next — which reads as an anaemic book rather than as a bug.
+    whole = 10 ** exponents[market["base"]]
+    for flag, fraction in (("quote_size", 2), ("take_size", 4), ("retail_size", 12)):
+        if getattr(args, flag) is None:
+            setattr(args, flag, whole // fraction)
+
+    # Volatility and spread default to fractions of the starting price rather
+    # than to absolute minor units. The BTC-era defaults were those same
+    # fractions of $50,000; kept absolute they are a rounding error on an
+    # expensive asset and a total collapse on a cheap one — a $40 step is
+    # nothing to bitcoin and a quarter of a solana.
+    reference = args.price * 10 ** exponents[market["quote"]]
+    for flag, per_10k in (("vol", 8), ("trend", 5), ("spread", 24), ("requote", 18)):
+        if getattr(args, flag) is None:
+            setattr(args, flag, max(1, reference * per_10k // 10_000))
 
     sim = Simulation(
         api, market["symbol"],
