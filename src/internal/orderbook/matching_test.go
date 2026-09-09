@@ -1,6 +1,9 @@
 package orderbook
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 /*
 Matching tests for the incoming-BUY path.
@@ -317,4 +320,103 @@ func TestBookSurvivesAlternatingSides(t *testing.T) {
 
 	assertBestBid(t, ob, -1)
 	assertBestAsk(t, ob, -1)
+}
+
+/*
+Execution timestamps.
+
+The two branches of MatchOrder stamp their own times, so this is the kind of
+thing that drifts apart unnoticed — and it did: the sell-aggressor branch was
+stamping the incoming order's EntryTime while the buy-aggressor branch stamped
+the time of the match. Both feed Trade.ExecutionTime, which becomes
+trades.executed_at, which is what orders the tape.
+
+Comparing the two against each other cannot catch that, because with the bug all
+three assignments in a branch shared one value and stayed perfectly symmetric.
+So these drive MatchOrder directly with an order whose EntryTime is an hour
+stale. A branch that stamps entry time produces an hour-old fill; a branch that
+stamps match time does not. No reliance on clock resolution either way.
+*/
+
+const staleness = time.Hour
+
+// matchAgainstStaleOrder runs one incoming order through MatchOrder with an
+// EntryTime well in the past, and returns the trade with the moment the match
+// began.
+func matchAgainstStaleOrder(t *testing.T, ob *Orderbook, incoming *Order) (Trade, time.Time) {
+	t.Helper()
+
+	incoming.EntryTime = time.Now().Add(-staleness)
+	incoming.EventTime = incoming.EntryTime
+
+	before := time.Now()
+	trades := ob.MatchOrder(incoming)
+
+	if len(trades) != 1 {
+		t.Fatalf("got %d trades, want 1", len(trades))
+	}
+	return trades[0], before
+}
+
+func assertStampedAtMatch(t *testing.T, trade Trade, incoming, resting *Order, before time.Time) {
+	t.Helper()
+
+	if trade.ExecutionTime.Before(before) {
+		t.Fatalf("execution time %v is older than the match that produced it (%v) — "+
+			"stamped at order entry rather than at match",
+			trade.ExecutionTime, before)
+	}
+	if !incoming.EventTime.Equal(trade.ExecutionTime) {
+		t.Errorf("incoming order EventTime = %v, want the trade's %v",
+			incoming.EventTime, trade.ExecutionTime)
+	}
+	if !resting.EventTime.Equal(trade.ExecutionTime) {
+		t.Errorf("resting order EventTime = %v, want the trade's %v",
+			resting.EventTime, trade.ExecutionTime)
+	}
+}
+
+func TestIncomingBuyStampsExecutionAtMatchTime(t *testing.T) {
+	ob := newTestBook()
+
+	ob.LimitSell(1, 100, 2400)
+	resting := restingOrders(t, ob, 2400, Sell)[0]
+
+	incoming := &Order{ID: 2, Side: Buy, Shares: 40, Limit: 2500}
+	trade, before := matchAgainstStaleOrder(t, ob, incoming)
+
+	assertStampedAtMatch(t, trade, incoming, resting, before)
+}
+
+func TestIncomingSellStampsExecutionAtMatchTime(t *testing.T) {
+	ob := newTestBook()
+
+	ob.LimitBuy(1, 100, 2500)
+	resting := restingOrders(t, ob, 2500, Buy)[0]
+
+	incoming := &Order{ID: 2, Side: Sell, Shares: 40, Limit: 2400}
+	trade, before := matchAgainstStaleOrder(t, ob, incoming)
+
+	assertStampedAtMatch(t, trade, incoming, resting, before)
+}
+
+// Both branches must agree, since the tape is a single ordered sequence built
+// from whichever side happened to cross.
+func TestExecutionTimesAdvanceAcrossBothBranches(t *testing.T) {
+	ob := newTestBook()
+
+	// A spread, so neither resting order is taken while the book is set up.
+	ob.LimitBuy(1, 100, 2400)
+	ob.LimitSell(2, 100, 2600)
+
+	buyAggressor := ob.LimitBuy(3, 50, 2600)   // lifts the resting ask
+	sellAggressor := ob.LimitSell(4, 50, 2400) // hits the resting bid
+
+	if len(buyAggressor) != 1 || len(sellAggressor) != 1 {
+		t.Fatalf("got %d and %d trades, want 1 each", len(buyAggressor), len(sellAggressor))
+	}
+	if sellAggressor[0].ExecutionTime.Before(buyAggressor[0].ExecutionTime) {
+		t.Fatalf("sell-aggressor fill stamped %v, before the earlier buy-aggressor fill at %v",
+			sellAggressor[0].ExecutionTime, buyAggressor[0].ExecutionTime)
+	}
 }
