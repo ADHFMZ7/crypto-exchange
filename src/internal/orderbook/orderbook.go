@@ -3,6 +3,7 @@ package orderbook
 import (
 	"container/heap"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -526,4 +527,62 @@ func (ob *Orderbook) PrintBook() {
 	}
 
 	fmt.Println("\n============================================")
+}
+
+// DepthLevel is the live resting volume at one price.
+type DepthLevel struct {
+	Price  Price
+	Shares Shares
+	Orders int
+}
+
+// Depth reports resting volume per price — bids best-first (descending), asks
+// best-first (ascending) — capped at limit levels a side. A limit of 0 or less
+// returns every level.
+//
+// Volume is recounted from the orders at each level rather than read from
+// Level.TotalVolume, which a cancellation leaves stale: Cancel only flags the
+// order, and the level's running total is not corrected until matching reaches
+// it and evicts it. Reporting TotalVolume would advertise depth that is not
+// there.
+//
+// Levels are kept in their slices once created, even after emptying, so a level
+// with nothing live behind it is dropped rather than published as a zero.
+func (ob *Orderbook) Depth(limit int) (bids, asks []DepthLevel) {
+	return liveLevels(ob.LevelsBuy, Buy, limit), liveLevels(ob.LevelsSell, Sell, limit)
+}
+
+func liveLevels(levels []*Level, side Side, limit int) []DepthLevel {
+	out := make([]DepthLevel, 0, len(levels))
+
+	for _, level := range levels {
+		var shares Shares
+		var orders int
+
+		for _, order := range level.Orders.Data {
+			if order.Cancelled || order.Shares <= 0 {
+				continue
+			}
+			shares += order.Shares
+			orders++
+		}
+
+		if orders == 0 {
+			continue
+		}
+		out = append(out, DepthLevel{Price: level.LimitPrice, Shares: shares, Orders: orders})
+	}
+
+	// Best first: the highest bid and the lowest ask are the top of each book.
+	sort.Slice(out, func(i, j int) bool {
+		if side == Buy {
+			return out[i].Price > out[j].Price
+		}
+		return out[i].Price < out[j].Price
+	})
+
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
