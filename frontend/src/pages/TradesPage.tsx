@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
 import { IntegrationStatus } from "../components/IntegrationStatus";
 import { MarketTable } from "../components/MarketTable";
-import { ReferenceStatus } from "../components/ReferenceStatus";
 import { useAuth } from "../hooks/useAuth";
 import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
@@ -115,16 +114,21 @@ export const TradesPage: React.FC = () => {
         endpoint="GET /orders"
         note={
           <>
-            Read from the database, newest first — not from this browser. Fill progress comes from{" "}
-            <code>filled_quantity</code>, which settlement advances in the same transaction that
-            records the trade. Matching happens after the <strong>202</strong>, so this refreshes
-            every few seconds rather than waiting for you.
+            Everything you have placed, newest first. Open orders rest on the book until someone
+            trades against them — you can cancel one at any time before it fills.
+          </>
+        }
+        devNote={
+          <>
+            Read from Postgres, not this browser. Fill progress is <code>filled_quantity</code>,
+            advanced in the same transaction that records the trade, so the page polls rather than
+            waiting for you.
           </>
         }
         actions={
           <div className="inline-actions" style={{ gap: 10, alignItems: "center" }}>
             <span className="muted" style={{ fontSize: 12 }}>
-              auto-refreshing
+              updates automatically
             </span>
             <button
               type="button"
@@ -241,8 +245,6 @@ export const TradesPage: React.FC = () => {
       <FillsPanel />
 
       <MarketTable />
-
-      <ReferenceStatus />
 
       <IntegrationStatus />
     </div>

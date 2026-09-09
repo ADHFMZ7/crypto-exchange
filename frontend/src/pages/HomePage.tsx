@@ -119,7 +119,7 @@ export const HomePage: React.FC = () => {
         title={user ? `Hello, ${user.fullname}` : "Welcome"}
         kind="live"
         endpoint="GET /users/me, GET /wallets/me"
-        note="Identity and balances read from the database."
+        devNote="Identity and balances read from Postgres."
         actions={
           <>
             <Link to="/wallet">
@@ -164,11 +164,12 @@ export const HomePage: React.FC = () => {
         title={selectedSymbol || "Markets"}
         kind="live"
         endpoint="GET /markets/{symbol}/trades"
-        note={
+        note={<>Every trade on this market, oldest on the left.</>}
+        devNote={
           <>
-            Every execution on this market, plotted against the time it happened. Not candles —
-            there is no endpoint for those, and bucketing them here would mean inventing an interval
-            and presenting it as if the server had chosen it.
+            Raw executions from <code>GET /markets/{"{symbol}"}/trades</code>, not candles — there
+            is no endpoint for those, and bucketing them here would mean inventing an interval and
+            presenting it as if the server had chosen it.
           </>
         }
         actions={
@@ -236,7 +237,7 @@ export const HomePage: React.FC = () => {
         title="Recent orders"
         kind="live"
         endpoint="GET /orders"
-        note="Your five most recent orders, read from the database."
+        note="Your five most recent orders."
         actions={
           <Link to="/trades">
             <button type="button" className="ghost-button">

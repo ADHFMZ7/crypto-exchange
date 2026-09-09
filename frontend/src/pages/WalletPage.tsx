@@ -117,7 +117,13 @@ export const WalletPage: React.FC = () => {
         title="Balances"
         kind="live"
         endpoint="GET /wallets/me"
-        note="Read from the database, and refreshed on a timer — settlement moves funds between locked and available as orders fill."
+        note={
+          <>
+            <strong>Available</strong> is what you can spend now. <strong>Locked</strong> is
+            committed to orders you have open, and comes back when they fill or you cancel them.
+          </>
+        }
+        devNote="Read from Postgres and refreshed on a timer; settlement moves funds between the two columns as orders fill."
         actions={
           <button
             type="button"
@@ -184,9 +190,14 @@ export const WalletPage: React.FC = () => {
         endpoint="PATCH /wallets/me"
         note={
           <>
-            Sends a signed delta in the selected currency's <strong>minor units</strong> —
-            withdrawals are the same call with a negative amount. Depositing a currency you have
-            never held creates the balance, which is how you fund the sell side of a market.
+            This is a paper exchange, so funds appear out of nowhere. Add a currency you have never
+            held to fund the sell side of a market.
+          </>
+        }
+        devNote={
+          <>
+            <code>PATCH /wallets/me</code> takes a signed delta in that currency's minor units — a
+            withdrawal is the same call with a negative amount.
           </>
         }
       >

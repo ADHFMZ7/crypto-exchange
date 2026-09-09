@@ -74,12 +74,13 @@ export const MarketsPage: React.FC = () => {
         title="Currencies"
         kind="live"
         endpoint="GET /currencies"
-        note={
+        note={<>Everything you can hold here, and what you currently hold of it.</>}
+        devNote={
           <>
             Precision is what a currency's smallest unit is worth — every amount in this app is an
-            integer count of those, never a decimal. Nothing here is hardcoded in the frontend: a
-            second copy that disagreed with the backend would be a factor-of-10<sup>n</sup> error in
-            every figure on every screen.
+            integer count of those, never a decimal. Nothing is hardcoded in the frontend: a second
+            copy that disagreed with the backend would be a factor-of-10<sup>n</sup> error in every
+            figure on every screen.
           </>
         }
       >
@@ -152,10 +153,15 @@ export const MarketsPage: React.FC = () => {
         endpoint="GET /markets · GET /markets/tickers"
         note={
           <>
-            Order amounts are denominated in the <strong>base</strong>; prices and totals in the{" "}
-            <strong>quote</strong>. A market only moves when an order crosses on this exchange —
-            there is no external price feed, so an untraded market has no price at all rather than a
-            stale one.
+            Each market pairs two currencies. You trade an amount of the first, priced in the
+            second.
+          </>
+        }
+        devNote={
+          <>
+            Amounts are denominated in the <strong>base</strong>, prices and totals in the{" "}
+            <strong>quote</strong>. With no external feed, an untraded market has no price at all
+            rather than a stale one.
           </>
         }
       >

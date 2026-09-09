@@ -1,4 +1,5 @@
 import React from "react";
+import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { SourceBadge } from "./DataSource";
 import { ENDPOINTS, LIVE_ENDPOINT_COUNT } from "../lib/endpoints";
 
@@ -6,8 +7,12 @@ import { ENDPOINTS, LIVE_ENDPOINT_COUNT } from "../lib/endpoints";
  * Renders the frontend/backend contract from lib/endpoints so the integration
  * gap is visible in the running app.
  */
-export const IntegrationStatus: React.FC = () => (
-  <section className="panel">
+export const IntegrationStatus: React.FC = () => {
+  const { developer } = useDeveloperMode();
+  if (!developer) return null;
+
+  return (
+    <section className="panel">
     <div className="headline">
       <div>
         <div className="tag">Integration</div>
@@ -50,7 +55,8 @@ export const IntegrationStatus: React.FC = () => (
             </td>
           </tr>
         ))}
-      </tbody>
-    </table>
-  </section>
-);
+        </tbody>
+      </table>
+    </section>
+  );
+};

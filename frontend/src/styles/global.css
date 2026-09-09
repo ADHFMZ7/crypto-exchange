@@ -712,3 +712,12 @@ label.leg {
 .panel-fill .submit-order {
   margin-top: auto;
 }
+
+/* Developer mode is on: the toggle reads as engaged rather than as another
+   dormant control. */
+.icon-button-on,
+.icon-button-on:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--muted));
+}

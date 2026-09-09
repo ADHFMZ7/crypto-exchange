@@ -50,7 +50,13 @@ export const TradeTape: React.FC<Props> = ({ symbol }) => {
       kind="live"
       endpoint="GET /markets/{symbol}/trades"
       fill
-      note={<>Newest first. Colour is the side that crossed, not the side that profited.</>}
+      note={<>Trades that have actually happened here, most recent first.</>}
+      devNote={
+        <>
+          Colour is <code>taker_side</code> — the side that crossed the spread, not the side that
+          profited.
+        </>
+      }
     >
       {error && <div className="pill status-danger">{error}</div>}
 

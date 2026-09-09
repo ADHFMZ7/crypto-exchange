@@ -171,7 +171,18 @@ export const OrderTicket: React.FC<Props> = ({ market, balances, bestBid, bestAs
       kind="live"
       endpoint="POST /orders"
       fill
-      note={<>A <strong>202</strong> means queued for the book, not filled.</>}
+      note={
+        <>
+          Your order joins the book at the price you set and waits there until someone trades
+          against it. It may fill straight away, in pieces, or never.
+        </>
+      }
+      devNote={
+        <>
+          <code>POST /orders</code> answers <strong>202</strong> — queued for the matching worker,
+          not filled. Fill progress arrives on a later poll of <code>GET /orders</code>.
+        </>
+      }
     >
       <form className="ticket" onSubmit={submit}>
         <div className="side-toggle" role="group" aria-label="Order side">
@@ -294,7 +305,7 @@ export const OrderTicket: React.FC<Props> = ({ market, balances, bestBid, bestAs
             <span className="leg-unit">{market.quote}</span>
           </div>
           <div className="muted leg-hint">
-            {buying ? "What this locks, rounded up as the ledger does" : "What this raises at your limit"}
+            {buying ? "Held until this fills or you cancel it" : "What you receive if it fills at your price"}
           </div>
         </label>
 

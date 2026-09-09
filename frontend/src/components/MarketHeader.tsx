@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from "react";
+import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { api, errorMessage } from "../lib/api";
@@ -21,6 +22,7 @@ type Props = {
  */
 export const MarketHeader: React.FC<Props> = ({ symbol, children }) => {
   const { reference } = useReference();
+  const { developer } = useDeveloperMode();
 
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [error, setError] = useState<string>();
@@ -49,14 +51,18 @@ export const MarketHeader: React.FC<Props> = ({ symbol, children }) => {
   );
 
   return (
-    <div className="panel panel-live market-header">
+    // The strip is a panel built by hand rather than a SourcedPanel, so it has
+    // to honour developer mode itself.
+    <div className={`panel${developer ? " panel-live" : ""} market-header`}>
       <div className="market-identity">
         <span className="brand" style={{ fontSize: 20 }}>{symbol ?? "—"}</span>
-        <span className="tag source-badge source-live">
-          <span aria-hidden="true">●</span>
-          Live
-          <code className="source-endpoint">GET /markets/tickers</code>
-        </span>
+        {developer && (
+          <span className="tag source-badge source-live">
+            <span aria-hidden="true">●</span>
+            Live
+            <code className="source-endpoint">GET /markets/tickers</code>
+          </span>
+        )}
       </div>
 
       {ticker?.has_traded ? (

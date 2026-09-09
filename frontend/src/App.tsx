@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { ReferenceProvider } from "./hooks/useReference";
+import { DeveloperProvider } from "./hooks/useDeveloperMode";
 import { ThemeProvider } from "./hooks/useTheme";
 import { AuthPage } from "./pages/AuthPage";
 import { MarketsPage } from "./pages/MarketsPage";
@@ -71,6 +72,7 @@ const RoutedApp: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ThemeProvider>
+      <DeveloperProvider>
       <ReferenceProvider>
         <AuthProvider>
           <BrowserRouter>
@@ -78,6 +80,7 @@ const App: React.FC = () => {
           </BrowserRouter>
         </AuthProvider>
       </ReferenceProvider>
+    </DeveloperProvider>
     </ThemeProvider>
   );
 };

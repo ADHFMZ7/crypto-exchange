@@ -92,7 +92,13 @@ export const OrderBook: React.FC<Props> = ({ symbol, onSnapshot }) => {
       kind="live"
       endpoint="GET /orderbook/{symbol}"
       fill
-      note={<>Resting in the engine's memory. Cancelled orders are already excluded.</>}
+      note={<>Offers waiting to be traded against. Sellers above, buyers below.</>}
+      devNote={
+        <>
+          Read from the matching engine's memory, not from Postgres. Cancelled orders are excluded
+          before the engine evicts them.
+        </>
+      }
     >
       {error && <div className="pill status-danger">{error}</div>}
 
