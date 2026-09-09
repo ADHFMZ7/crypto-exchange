@@ -1,5 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { SourcedPanel } from "./DataSource";
+import { StreamBadge } from "./StreamBadge";
+import { useMarketStream } from "../hooks/useMarketStream";
 import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { api, errorMessage } from "../lib/api";
@@ -41,7 +43,28 @@ export const TradeTape: React.FC<Props> = ({ symbol }) => {
     }
   }, [symbol]);
 
-  usePolling(load, 3000, Boolean(symbol));
+  /*
+   * Executions arrive on the feed rather than being asked for.
+   *
+   * The snapshot still comes from REST — a stream only carries what happens
+   * after it connects — and is re-read on every reconnect, since the gap while
+   * disconnected is the one window the feed cannot fill.
+   *
+   * Deduplicated by id because those two sources overlap: a trade can arrive on
+   * the feed and then appear again in the snapshot that follows a reconnect.
+   */
+  const status = useMarketStream(
+    symbol,
+    (trade) =>
+      setTrades((prev) =>
+        prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev].slice(0, TRADES)
+      ),
+    load
+  );
+
+  // Only while the feed is down. Falling back to asking is better than showing
+  // a tape that has quietly stopped moving.
+  usePolling(load, 4000, Boolean(symbol) && status !== "live");
 
   return (
     <SourcedPanel
@@ -50,6 +73,7 @@ export const TradeTape: React.FC<Props> = ({ symbol }) => {
       kind="live"
       endpoint="GET /markets/{symbol}/trades"
       fill
+      actions={<StreamBadge status={status} />}
       note={<>Trades that have actually happened here, most recent first.</>}
       devNote={
         <>
