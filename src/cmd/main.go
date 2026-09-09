@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 
@@ -29,6 +30,17 @@ func main() {
 
 	stores := stores.NewStores(dbpool)
 	services := services.NewServices(stores, registry, SChan)
+
+	// Before anything can be accepted. The books were just built empty, so any
+	// order still resting in Postgres from a previous run is unmatchable and is
+	// holding funds against something that no longer exists. Serving without
+	// unwinding those would hand out a market whose depth disagrees with its
+	// own ledger — so a flush that fails is a reason not to start, not a
+	// warning to log and continue past.
+	if err := services.Orders.CancelRestingOrders(context.Background()); err != nil {
+		log.Fatalf("could not reconcile the order book with the database: %v\n", err)
+	}
+
 	mux := api.NewRouter(services)
 
 	var h http.Handler = mux

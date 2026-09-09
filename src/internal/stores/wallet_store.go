@@ -3,6 +3,7 @@ package stores
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/jackc/pgx/v5"
@@ -175,6 +176,68 @@ var ErrNotCancellable = errors.New("order is no longer open")
 //
 // This is the mirror of PlaceOrder: that one moves available into locked and
 // opens the order, this one moves whatever is left back and closes it.
+func (store *WalletStore) CancelOrder(ctx context.Context, orderID int64, lockedCurrency string) error {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op if already committed
+
+	if _, err := releaseOrder(ctx, tx, orderID, lockedCurrency); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// OrderRelease names one order and the currency its lock is held in. The
+// currency comes from the caller because which one it is depends on the side
+// and the market, and neither is a store's business.
+type OrderRelease struct {
+	OrderID  int64
+	Currency string
+}
+
+// CancelRestingOrders cancels many orders in one transaction and returns how
+// much was released, by currency.
+//
+// This is the boot-time flush. The order book lives in memory and Postgres does
+// not, so a restart leaves rows resting that nothing can ever match, with their
+// funds locked against orders that no longer exist anywhere. Cancelling them is
+// what makes the two states agree again — the cheap end of the recovery
+// spectrum, chosen over rebuilding the book because it cannot be wrong.
+//
+// One transaction rather than one per order: a half-applied flush would leave
+// the exchange serving with some phantom orders still locked, and at boot there
+// is nothing to contend with. An order that is already terminal is skipped
+// rather than failing the batch, so the flush is safe to run twice.
+func (store *WalletStore) CancelRestingOrders(ctx context.Context, releases []OrderRelease) (map[string]int64, error) {
+	freed := map[string]int64{}
+	if len(releases) == 0 {
+		return freed, nil
+	}
+
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	for _, release := range releases {
+		released, err := releaseOrder(ctx, tx, release.OrderID, release.Currency)
+		if errors.Is(err, ErrNotCancellable) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("releasing order %d: %w", release.OrderID, err)
+		}
+		freed[release.Currency] += released
+	}
+
+	return freed, tx.Commit(ctx)
+}
+
+// releaseOrder closes one order and returns what it still had locked.
 //
 // The status test lives inside the statement rather than in a read beforehand,
 // so a fill settling concurrently is resolved by Postgres rather than by
@@ -187,16 +250,10 @@ var ErrNotCancellable = errors.New("order is no longer open")
 // The CTE exists because RETURNING reports post-update values, and the amount
 // to give back is the value from before. `held` captures it under FOR UPDATE;
 // the UPDATE then zeroes the column and hands that captured figure back.
-func (store *WalletStore) CancelOrder(ctx context.Context, orderID int64, lockedCurrency string) error {
-	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx) // no-op if already committed
-
+func releaseOrder(ctx context.Context, tx pgx.Tx, orderID int64, lockedCurrency string) (int64, error) {
 	var userID, released int64
 
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		WITH held AS (
 			SELECT id, user_id, locked_remaining
 			FROM orders
@@ -216,19 +273,19 @@ func (store *WalletStore) CancelOrder(ctx context.Context, orderID int64, locked
 		Scan(&userID, &released)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotCancellable
+		return 0, ErrNotCancellable
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// A fully filled lock leaves nothing to return, and moveBalance would
 	// rather not be asked to move zero.
 	if released > 0 {
 		if err := moveBalance(ctx, tx, userID, lockedCurrency, released, -released); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	return released, nil
 }
