@@ -334,8 +334,19 @@ func TestMarketDataShapes(t *testing.T) {
 	rec = a.do(http.MethodGet, "/markets/tickers", "", nil)
 	a.expect(rec, http.StatusOK, "GET /markets/tickers")
 	a.decode(rec, &tickers)
-	if len(tickers.Tickers) != 1 {
-		t.Errorf("tickers = %+v, want one per listed market", tickers.Tickers)
+	_, listedMarkets := market.Default()
+	if len(tickers.Tickers) != len(listedMarkets) {
+		t.Errorf("got %d tickers, want one per listed market (%d)",
+			len(tickers.Tickers), len(listedMarkets))
+	}
+	// Only BTC-USD traded above; the rest must still be reported, as untraded.
+	for _, ticker := range tickers.Tickers {
+		if ticker.Market == "BTC-USD" && !ticker.HasTraded {
+			t.Error("BTC-USD reports no trades after one executed")
+		}
+		if ticker.Market != "BTC-USD" && ticker.HasTraded {
+			t.Errorf("%s reports trades it never had", ticker.Market)
+		}
 	}
 
 	var book struct {
@@ -407,7 +418,19 @@ func TestReferenceDataIsPublic(t *testing.T) {
 		Symbol, Base, Quote string
 	}
 	a.decode(rec, &markets)
-	if len(markets) != 1 || markets[0].Symbol != "BTC-USD" {
-		t.Fatalf("markets = %+v", markets)
+
+	listed, _ := market.Default()
+	_ = listed
+	if len(markets) == 0 {
+		t.Fatal("no markets listed")
+	}
+	// Listing order is part of the contract: the frontend defaults to the first.
+	if markets[0].Symbol != "BTC-USD" {
+		t.Errorf("first market = %s, want BTC-USD", markets[0].Symbol)
+	}
+	for _, m := range markets {
+		if m.Symbol == "" || m.Base == "" || m.Quote == "" {
+			t.Errorf("market %+v is missing a field", m)
+		}
 	}
 }

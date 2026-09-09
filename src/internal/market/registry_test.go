@@ -187,3 +187,107 @@ func TestCurrenciesAreSortedForStableOutput(t *testing.T) {
 		}
 	}
 }
+
+// The listing the exchange actually ships with, checked rather than assumed —
+// a typo here is a currency nobody can spend and a market nobody can reach.
+func TestDefaultListing(t *testing.T) {
+	currencies, markets := Default()
+
+	wantCurrencies := map[string]int{"USD": 2, "BTC": 8, "ETH": 8, "SOL": 9}
+	if len(currencies) != len(wantCurrencies) {
+		t.Fatalf("got %d currencies, want %d", len(currencies), len(wantCurrencies))
+	}
+	for _, c := range currencies {
+		exponent, listed := wantCurrencies[c.Code]
+		if !listed {
+			t.Errorf("unexpected currency %s", c.Code)
+			continue
+		}
+		if c.Exponent != exponent {
+			t.Errorf("%s exponent = %d, want %d", c.Code, c.Exponent, exponent)
+		}
+		if c.Name == "" {
+			t.Errorf("%s has no name", c.Code)
+		}
+	}
+
+	wantMarkets := []string{"BTC-USD", "ETH-USD", "SOL-USD"}
+	if len(markets) != len(wantMarkets) {
+		t.Fatalf("got %d markets, want %d", len(markets), len(wantMarkets))
+	}
+	for i, symbol := range wantMarkets {
+		if markets[i].Symbol != symbol {
+			t.Errorf("market %d = %s, want %s (listing order is the UI's default)",
+				i, markets[i].Symbol, symbol)
+		}
+		if markets[i].Quote.Code != "USD" {
+			t.Errorf("%s is quoted in %s, want USD", symbol, markets[i].Quote.Code)
+		}
+	}
+}
+
+// Every listed currency must survive the wire it is sent over. This is the
+// check that would have caught ETH being added at its native 18 decimals, where
+// a JSON number cannot carry even one whole coin.
+func TestEveryDefaultCurrencyFitsTheWire(t *testing.T) {
+	const jsSafeInteger = int64(1) << 53
+
+	currencies, _ := Default()
+	for _, c := range currencies {
+		if c.Exponent > MaxExponent {
+			t.Errorf("%s exponent %d exceeds MaxExponent %d", c.Code, c.Exponent, MaxExponent)
+			continue
+		}
+
+		// How many whole units stay exact as a JSON number.
+		whole := jsSafeInteger / c.Scale()
+		if whole < 1_000_000 {
+			t.Errorf("%s: only %d whole units survive a JSON number — too coarse to trade",
+				c.Code, whole)
+		}
+	}
+}
+
+func TestExponentBeyondTheWireIsRefused(t *testing.T) {
+	// Ethereum's native unit, which is exactly the mistake this bound prevents.
+	_, err := NewMarketRegistry([]Currency{{Code: "ETH", Name: "Ethereum", Exponent: 18}}, nil)
+	if err == nil {
+		t.Fatal("accepted an 18-decimal currency the wire format cannot carry")
+	}
+
+	if _, err := NewMarketRegistry([]Currency{{Code: "OK", Exponent: MaxExponent}}, nil); err != nil {
+		t.Fatalf("refused a currency at exactly MaxExponent: %v", err)
+	}
+}
+
+// A market quoted in something other than USD is not special to the engine —
+// base and quote are roles, not identities — so the registry must index one.
+func TestACryptoQuotedMarketIndexesLikeAnyOther(t *testing.T) {
+	e := Currency{Code: "ETH", Name: "Ethereum", Exponent: 8}
+	b := btc()
+
+	reg, err := NewMarketRegistry([]Currency{b, e},
+		[]Market{{Symbol: "ETH-BTC", Base: e, Quote: b}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := reg.BySymbol("ETH-BTC")
+	if !ok {
+		t.Fatal("ETH-BTC not indexed")
+	}
+	if m.Base.Code != "ETH" || m.Quote.Code != "BTC" {
+		t.Fatalf("base/quote = %s/%s, want ETH/BTC", m.Base.Code, m.Quote.Code)
+	}
+
+	currency, amount, err := m.Spends("buy", 100_000_000, 3_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currency.Code != "BTC" {
+		t.Fatalf("a buy on ETH-BTC spends %s, want BTC", currency.Code)
+	}
+	if amount != 3_000_000 {
+		t.Fatalf("one whole ETH at 0.03 BTC costs %d satoshis, want 3000000", amount)
+	}
+}
