@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { ReferenceProvider } from "./hooks/useReference";
 import { ThemeProvider } from "./hooks/useTheme";
 import { AuthPage } from "./pages/AuthPage";
+import { MarketsPage } from "./pages/MarketsPage";
 import { CreateTradePage } from "./pages/CreateTradePage";
 import { HomePage } from "./pages/HomePage";
 import { TradesPage } from "./pages/TradesPage";
@@ -33,6 +34,14 @@ const RoutedApp: React.FC = () => {
           element={
             <ProtectedRoute>
               <CreateTradePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/markets"
+          element={
+            <ProtectedRoute>
+              <MarketsPage />
             </ProtectedRoute>
           }
         />

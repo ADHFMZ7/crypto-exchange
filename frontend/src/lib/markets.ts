@@ -1,5 +1,5 @@
 import { formatMinorUnits, toAmount } from "./decimal";
-import type { ReferenceData } from "./reference";
+import type { Market, ReferenceData } from "./reference";
 
 export type { Currency, Market, ReferenceData } from "./reference";
 
@@ -29,6 +29,11 @@ export function minorUnitName(code: string, exponent: number): string {
   if (exponent === 0) return `whole ${code}`;
   if (code === "USD") return "cents";
   if (code === "BTC") return "satoshis";
+  // Only where the exponent actually matches the chain's own unit. SOL is
+  // listed at nine decimals, which is a lamport. ETH is listed at eight, which
+  // is NOT a wei — wei is eighteen, past what a JSON number can carry — so it
+  // deliberately has no folk name here rather than a wrong one.
+  if (code === "SOL" && exponent === 9) return "lamports";
   return `${code} minor units`;
 }
 
@@ -128,4 +133,22 @@ export function formatQuantity(ref: ReferenceData, symbol: string, quantityMinor
 export function percentChange(ticker: { change: number; open_price: number }): number | undefined {
   if (!ticker.open_price) return undefined;
   return (ticker.change / ticker.open_price) * 100;
+}
+
+/** Every market a currency trades in, in listing order. */
+export function marketsFor(ref: ReferenceData, code: string) {
+  return ref.markets.filter((m) => m.base === code || m.quote === code);
+}
+
+/**
+ * The role a currency plays in a market.
+ *
+ * Base and quote are not decoration: order amounts are denominated in the base
+ * and prices in the quote, so which one a currency is decides what its numbers
+ * mean on every screen.
+ */
+export function roleIn(market: Market, code: string): "base" | "quote" | undefined {
+  if (market.base === code) return "base";
+  if (market.quote === code) return "quote";
+  return undefined;
 }
