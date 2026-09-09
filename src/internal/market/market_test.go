@@ -220,3 +220,128 @@ func TestScale(t *testing.T) {
 		}
 	}
 }
+
+// FillNotional is the quote amount that changes hands for one fill, and the
+// direction it rounds is a money decision, not a detail: settlement computes
+// this figure once and uses it twice — debiting the buyer and crediting the
+// seller — so a difference of one minor unit between the two would be money
+// created or destroyed on every trade with a remainder.
+func TestFillNotionalRoundsUpLikeTheLock(t *testing.T) {
+	m := btcusd()
+
+	cases := []struct {
+		name            string
+		quantity, price int64
+		want            int64
+	}{
+		{"exact", 100_000_000, 4_517_500, 4_517_500},
+		{"a remainder rounds up", 33_333_333, 4_517_500, 1_505_834},
+		{"one satoshi is never free", 1, 4_517_500, 1},
+		{"a whole unit at one", 100_000_000, 1, 1},
+		{"half a unit", 50_000_000, 4_517_500, 2_258_750},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := m.FillNotional(tc.quantity, tc.price)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("FillNotional(%d, %d) = %d, want %d", tc.quantity, tc.price, got, tc.want)
+			}
+		})
+	}
+}
+
+// It must agree with the lock Spends took, or a buyer's releases could add up
+// to more than was ever locked and the final fill would fail against the
+// non-negative CHECK.
+func TestFillNotionalAgreesWithSpends(t *testing.T) {
+	m := btcusd()
+
+	for _, quantity := range []int64{1, 999, 33_333_333, 100_000_000, 250_000_001} {
+		for _, price := range []int64{1, 4_517_500, 9_999_999} {
+			_, locked, err := m.Spends("buy", quantity, price)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fill, err := m.FillNotional(quantity, price)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fill != locked {
+				t.Fatalf("quantity %d at %d: a full fill costs %d but the lock was %d",
+					quantity, price, fill, locked)
+			}
+		}
+	}
+}
+
+func TestFillNotionalRefusesNonPositiveAmounts(t *testing.T) {
+	m := btcusd()
+
+	for _, tc := range []struct{ quantity, price int64 }{
+		{0, 100}, {100, 0}, {-1, 100}, {100, -1}, {0, 0},
+	} {
+		if _, err := m.FillNotional(tc.quantity, tc.price); !errors.Is(err, ErrNotPositive) {
+			t.Errorf("FillNotional(%d, %d) err = %v, want ErrNotPositive", tc.quantity, tc.price, err)
+		}
+	}
+}
+
+func TestFillNotionalRefusesAnOverflow(t *testing.T) {
+	m := btcusd()
+
+	if _, err := m.FillNotional(1<<62, 1<<62); !errors.Is(err, ErrOverflow) {
+		t.Errorf("err = %v, want ErrOverflow", err)
+	}
+}
+
+// Locks says which currency a side's funds are held in, without needing an
+// amount — which is what releasing a cancelled order needs.
+func TestLocksNamesTheCurrencyEachSideCommits(t *testing.T) {
+	m := btcusd()
+
+	buy, err := m.Locks("buy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buy.Code != m.Quote.Code {
+		t.Errorf("a buy locks %s, want the quote %s", buy.Code, m.Quote.Code)
+	}
+
+	sell, err := m.Locks("sell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sell.Code != m.Base.Code {
+		t.Errorf("a sell locks %s, want the base %s", sell.Code, m.Base.Code)
+	}
+
+	for _, side := range []string{"", "BUY", "up", "hold"} {
+		if _, err := m.Locks(side); !errors.Is(err, ErrInvalidSide) {
+			t.Errorf("Locks(%q) err = %v, want ErrInvalidSide", side, err)
+		}
+	}
+}
+
+// Locks and Spends must never disagree about the currency, since one decides
+// what to take and the other what to give back.
+func TestLocksAgreesWithSpends(t *testing.T) {
+	m := btcusd()
+
+	for _, side := range []string{"buy", "sell"} {
+		spent, _, err := m.Spends(side, 100_000_000, 4_500_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held, err := m.Locks(side)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if spent.Code != held.Code {
+			t.Fatalf("%s spends %s but locks %s", side, spent.Code, held.Code)
+		}
+	}
+}
