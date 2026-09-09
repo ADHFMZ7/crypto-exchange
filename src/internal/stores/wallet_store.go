@@ -151,11 +151,14 @@ func (store *WalletStore) PlaceOrder(ctx context.Context,
 		return -1, err
 	}
 
+	// locked_remaining starts at the full debit: settlement decrements it as
+	// fills release the lock, and needs a per-order figure because
+	// balances.locked is aggregated across every order the user holds.
 	err = tx.QueryRow(ctx, `
-		INSERT INTO orders (user_id, quantity, price_each, side, market, status)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO orders (user_id, quantity, price_each, side, market, status, locked_remaining)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id
-	`, userID, quantity, price, side, market, "open").Scan(&orderID)
+	`, userID, quantity, price, side, market, "open", debit_amount).Scan(&orderID)
 
 	if err != nil {
 		return -1, err

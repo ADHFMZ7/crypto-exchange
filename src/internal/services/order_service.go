@@ -20,9 +20,10 @@ type OrderService struct {
 
 	Orderbooks map[string]*orderbook.Orderbook
 	RQueues    map[string]chan Request
+	SChan      chan models.Trade
 }
 
-func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry) *OrderService {
+func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry, SChan chan models.Trade) *OrderService {
 
 	channels := map[string]chan Request{}
 
@@ -34,6 +35,7 @@ func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderSt
 
 		Orderbooks: make(map[string]*orderbook.Orderbook),
 		RQueues:    channels,
+		SChan:      SChan,
 	}
 
 	for _, m := range registry.Markets() {
@@ -63,12 +65,32 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 
 		shares := orderbook.Shares(request.Shares)
 		price := orderbook.Price(request.Price)
+		var trades []orderbook.Trade
+		var side string
 
 		switch request.Type {
 		case LimitBuy:
-			book.LimitBuy(id, shares, price)
+			trades = book.LimitBuy(id, shares, price)
+			side = "buy"
 		case LimitSell:
-			book.LimitSell(id, shares, price)
+			trades = book.LimitSell(id, shares, price)
+			side = "sell"
+		default:
+			continue
+		}
+
+		for _, trade := range trades {
+			trade_model := models.Trade{
+				Market:          market,
+				RestingOrderID:  int64(trade.RestingOrderID),
+				IncomingOrderID: int64(trade.IncomingOrderID),
+				IncomingSide:    side,
+				Quantity:        int64(trade.Quantity),
+				Price:           int64(trade.Price),
+				ExecutionTime:   trade.ExecutionTime,
+			}
+
+			service.SChan <- trade_model
 		}
 
 	}

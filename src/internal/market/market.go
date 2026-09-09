@@ -44,6 +44,14 @@ func (m *Market) notional(quantity, price int64, mode rounding) (int64, error) {
 	return quotient.Int64(), nil
 }
 
+// FillNotional reports the quote amount that changes hands for one fill.
+//
+// Rounded up, the same direction Spends locked at, so the amounts settlement
+// releases can never add up to more than the buyer had locked.
+func (m *Market) FillNotional(quantity, price int64) (int64, error) {
+	return m.notional(quantity, price, roundUp)
+}
+
 // Spends reports the currency debited and the amount to lock.
 func (m *Market) Spends(side string, quantity int64, price int64) (Currency, int64, error) {
 

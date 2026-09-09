@@ -8,6 +8,7 @@ type Stores struct {
 	Users   *UserStore
 	Wallets *WalletStore
 	Orders  *OrderStore
+	Trades  *TradeStore
 }
 
 func NewStores(pool *pgxpool.Pool) *Stores {
@@ -15,5 +16,6 @@ func NewStores(pool *pgxpool.Pool) *Stores {
 		Users:   &UserStore{pool},
 		Wallets: &WalletStore{pool},
 		Orders:  &OrderStore{pool},
+		Trades:  &TradeStore{pool},
 	}
 }

@@ -1,102 +1,73 @@
 package services
 
-// import (
-// 	"context"
-// 	"sync/atomic"
+import (
+	"context"
+	"log"
 
-// 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
-// 	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
-// 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
-// )
+	"github.com/ADHFMZ7/crypto-exchange/internal/market"
+	"github.com/ADHFMZ7/crypto-exchange/internal/models"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+)
 
-// type TradeService struct {
-// 	WalletStore *stores.WalletStore
-// 	UserStore   *stores.UserStore
+type TradeService struct {
+	WalletStore *stores.WalletStore
+	UserStore   *stores.UserStore
+	TradeStore  *stores.TradeStore
 
-// 	MarketRegistry *market.Registry
+	MarketRegistry *market.Registry
 
-// 	Orderbook *orderbook.Orderbook
+	SettlementChan chan models.Trade
+}
 
-// 	RQueues map[string]chan Request
+func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, registry *market.Registry, SChan chan models.Trade) *TradeService {
 
-// 	nextOrderID atomic.Int64
-// }
+	service := &TradeService{
+		WalletStore: walletStore,
+		UserStore:   userStore,
+		TradeStore:  tradeStore,
 
-// func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, registry *market.Registry) *TradeService {
+		MarketRegistry: registry,
+		SettlementChan: SChan,
+	}
 
-// 	symbols := []string{"BTC-USD"}
+	go service.SettlementWorker()
 
-// 	service := &TradeService{
-// 		WalletStore: walletStore,
-// 		UserStore:   userStore,
+	return service
+}
 
-// 		MarketRegistry: registry,
+func (service *TradeService) SettlementWorker() {
 
-// 		Orderbook: orderbook.NewOrderbook(),
+	// TODO: Figure out where this should come from?
+	ctx := context.Background()
 
-// 	}
+	log.Println("settlement: worker started")
 
-// 	return service
-// }
+	for trade := range service.SettlementChan {
 
-// func (service *TradeService) LimitSell(
-// 	ctx context.Context,
-// 	userid int64,
-// 	market market.Market,
-// 	volume int64,
-// 	limit int64,
-// ) {
-// 	// User with id userid is making a request to sell volume units of c1 at price limit for each unit of c2
+		// A dropped fill is a fill the book has already acted on and the ledger
+		// will never record, so every message below names the orders involved:
+		// it is the only trace left of what the two sides now disagree about.
+		m, ok := service.MarketRegistry.BySymbol(trade.Market)
+		if !ok {
+			log.Printf("settlement: dropped fill on unknown market %q (orders %d/%d, %d @ %d)",
+				trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price)
+			continue
+		}
 
-// 	currency := market.Base
+		quoteAmount, err := m.FillNotional(trade.Quantity, trade.Price)
+		if err != nil {
+			log.Printf("settlement: dropped fill on %s (orders %d/%d, %d @ %d): notional: %v",
+				trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price, err)
+			continue
+		}
 
-// 	order_id, err := service.WalletStore.PlaceOrder(ctx, userid, currency.Code, volume, limit, "sell", market.Symbol)
-// 	// If these funds exist, lock them and return true. After this point, funds are already validated
+		if err := service.TradeStore.Settle(ctx, trade, m.Base.Code, m.Quote.Code, quoteAmount); err != nil {
+			log.Printf("settlement: dropped fill on %s (orders %d/%d, %d @ %d): settle: %v",
+				trade.Market, trade.RestingOrderID, trade.IncomingOrderID, trade.Quantity, trade.Price, err)
+			continue
+		}
 
-// 	if err != nil {
-// 		println("ERROR: LimitSell Failed!")
-// 		return
-// 	}
+	}
 
-// 	// We can now safely add to the correct order queue
-// 	req := Request{
-// 		Type:    LimitSell,
-// 		OrderID: order_id,
-// 		Price:   limit,
-// 		Shares:  volume,
-// 	}
-
-// 	service.RQueues[market.Symbol] <- req
-// 	// Consumed by orderbook worker
-
-// 	// TODO: Maybe add more error checking later?
-
-// }
-
-// func (service *TradeService) LimitBuy(
-// 	ctx context.Context,
-// 	userid int64,
-// 	market market.Market,
-// 	volume int64,
-// 	limit int64,
-// ) {
-
-// 	currency := market.Quote
-
-// 	order_id, err := service.WalletStore.PlaceOrder(ctx, userid, currency.Code, volume, limit, "buy", market.Symbol)
-
-// 	if err != nil {
-// 		println("ERROR: LimitBuy Failed!")
-// 		return
-// 	}
-
-// 	req := Request{
-// 		Type:    LimitBuy,
-// 		OrderID: order_id,
-// 		Price:   limit,
-// 		Shares:  volume,
-// 	}
-
-// 	service.RQueues[market.Symbol] <- req
-
-// }
+	log.Println("settlement: worker stopped, no further fills will settle")
+}
