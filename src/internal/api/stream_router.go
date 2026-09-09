@@ -75,6 +75,15 @@ func (router *StreamRouter) Stream(w http.ResponseWriter, r *http.Request) {
 	client := router.Hub.Subscribe()
 	defer client.Close()
 
+	// Feed clients are the one part of the exchange with no other trace: an
+	// order leaves a row, a fill leaves a trade, a connection leaves nothing.
+	// Worth a line each way, with the count, so "is anyone watching" and "are
+	// connections leaking" are answerable without a debugger.
+	log.Printf("stream: client connected (%d watching)", router.Hub.Clients())
+	defer func() {
+		log.Printf("stream: client disconnected (%d watching)", router.Hub.Clients()-1)
+	}()
+
 	// A client may name its markets up front, so the common case needs no
 	// round trip before events start arriving.
 	if markets := r.URL.Query().Get("markets"); markets != "" {
