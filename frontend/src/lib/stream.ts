@@ -38,8 +38,21 @@ type Connection = {
   status: StreamStatus;
   attempt: number;
   retry?: number;
+  /** Set while the last subscriber has left but the socket is being held open. */
+  linger?: number;
   closed: boolean;
 };
+
+/**
+ * How long a connection outlives its last subscriber.
+ *
+ * Two things make a component unsubscribe and immediately resubscribe: React's
+ * StrictMode double-invokes effects in development, and navigating between two
+ * pages that both watch the same market. Closing the socket the instant the
+ * count reaches zero turns both into a disconnect and a reconnect that nobody
+ * asked for. Waiting a moment costs one idle socket and makes both free.
+ */
+const LINGER_MS = 3000;
 
 const connections = new Map<string, Connection>();
 
@@ -105,6 +118,11 @@ export function subscribe(symbol: string, handlers: StreamHandlers): () => void 
     open(symbol, connection);
   }
 
+  // A subscriber arriving during the grace period reclaims the socket rather
+  // than waiting for it to close and opening another.
+  window.clearTimeout(connection.linger);
+  connection.linger = undefined;
+
   connection.handlers.add(handlers);
   handlers.onStatus?.(connection.status);
 
@@ -115,17 +133,21 @@ export function subscribe(symbol: string, handlers: StreamHandlers): () => void 
     current.handlers.delete(handlers);
     if (current.handlers.size > 0) return;
 
-    // The last watcher left. Tear the socket down rather than holding it open
-    // for a page nobody is on.
-    current.closed = true;
-    window.clearTimeout(current.retry);
-    if (current.socket) {
-      current.socket.onopen = null;
-      current.socket.onmessage = null;
-      current.socket.onclose = null;
-      current.socket.onerror = null;
-      current.socket.close();
-    }
-    connections.delete(symbol);
+    // The last watcher left. Hold the socket briefly in case this is a remount
+    // or a navigation rather than someone actually leaving the market.
+    current.linger = window.setTimeout(() => {
+      if (current.handlers.size > 0) return;
+
+      current.closed = true;
+      window.clearTimeout(current.retry);
+      if (current.socket) {
+        current.socket.onopen = null;
+        current.socket.onmessage = null;
+        current.socket.onclose = null;
+        current.socket.onerror = null;
+        current.socket.close();
+      }
+      connections.delete(symbol);
+    }, LINGER_MS);
   };
 }
