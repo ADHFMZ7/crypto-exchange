@@ -295,7 +295,7 @@ func TestReplayingAFillAppliesItExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.Settle(ctx, id, fill, "BTC", "USD", fiftyDollars); err != nil {
+	if _, err := store.Settle(ctx, id, fill, "BTC", "USD", fiftyDollars); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,7 +304,7 @@ func TestReplayingAFillAppliesItExactlyOnce(t *testing.T) {
 	filled, _, lockedRemaining := readOrder(t, buyOrder)
 
 	// The replay a restart would perform.
-	err = store.Settle(ctx, id, fill, "BTC", "USD", fiftyDollars)
+	_, err = store.Settle(ctx, id, fill, "BTC", "USD", fiftyDollars)
 	if !errors.Is(err, ErrAlreadyApplied) {
 		t.Fatalf("second Settle = %v, want ErrAlreadyApplied", err)
 	}

@@ -232,7 +232,7 @@ func minimalServices(t *testing.T) *services.Services {
 // The route table itself: method and path, without a database behind it.
 // Protected routes answer 401, so reaching the guard proves the route resolved.
 func TestRouterRouteTable(t *testing.T) {
-	mux := NewRouter(minimalServices(t))
+	mux := NewRouter(minimalServices(t), nil)
 
 	cases := []struct {
 		method string

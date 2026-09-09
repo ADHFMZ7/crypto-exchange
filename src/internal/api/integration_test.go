@@ -2,10 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +16,9 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stream"
 	"github.com/ADHFMZ7/crypto-exchange/internal/testsupport"
+	"github.com/coder/websocket"
 )
 
 /*
@@ -27,8 +32,10 @@ changed field name or a wrong status is worth catching.
 */
 
 type api struct {
-	t      *testing.T
-	router http.Handler
+	t        *testing.T
+	router   http.Handler
+	hub      *stream.Hub
+	services *services.Services
 }
 
 func newAPI(t *testing.T) *api {
@@ -47,7 +54,10 @@ func newAPI(t *testing.T) *api {
 	all := stores.NewStores(pool)
 	svc := services.NewServices(all, registry, make(chan models.LedgerEvent, 256))
 
-	return &api{t: t, router: NewRouter(svc)}
+	hub := stream.NewHub()
+	svc.Trades.Stream = hub
+
+	return &api{t: t, router: NewRouter(svc, hub), hub: hub, services: svc}
 }
 
 func (a *api) do(method, path, token string, body any) *httptest.ResponseRecorder {
@@ -433,4 +443,187 @@ func TestReferenceDataIsPublic(t *testing.T) {
 			t.Errorf("market %+v is missing a field", m)
 		}
 	}
+}
+
+// ── the live feed ─────────────────────────────────────────────────────────
+
+// dial opens a real websocket against a real server and returns a reader for it.
+func (a *api) dial(query string) (*websocket.Conn, *httptest.Server) {
+	a.t.Helper()
+
+	server := httptest.NewServer(a.router)
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/stream" + query
+
+	conn, _, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil {
+		server.Close()
+		a.t.Fatalf("dialling %s: %v", url, err)
+	}
+	return conn, server
+}
+
+// nextTrade reads until a trade arrives or the test gives up.
+func nextTrade(t *testing.T, conn *websocket.Conn) models.MarketTrade {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for {
+		_, raw, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("reading from the feed: %v", err)
+		}
+
+		var event struct {
+			Type    string             `json:"type"`
+			Market  string             `json:"market"`
+			Payload models.MarketTrade `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &event); err != nil {
+			t.Fatalf("feed sent something that is not an event: %s", raw)
+		}
+		if event.Type == "trade" {
+			return event.Payload
+		}
+	}
+}
+
+// The whole point: an order crossing on the book reaches a connected client
+// without anybody asking for it.
+func TestAnExecutionReachesTheLiveFeed(t *testing.T) {
+	a := newAPI(t)
+	seller := a.account("seller@test", 0, 500_000_000)
+	buyer := a.account("buyer@test", 100_000_000, 0)
+
+	conn, server := a.dial("?markets=BTC-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+
+	// Let the subscription settle before anything can trade.
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+	a.do(http.MethodPost, "/orders", buyer, map[string]any{
+		"market": "BTC-USD", "side": "buy", "quantity": 40_000_000, "price": 4_600_000})
+
+	trade := nextTrade(t, conn)
+
+	if trade.Market != "BTC-USD" {
+		t.Errorf("market = %q", trade.Market)
+	}
+	if trade.Quantity != 40_000_000 {
+		t.Errorf("quantity = %d, want the 40,000,000 that crossed", trade.Quantity)
+	}
+	// The resting ask's price, not the buyer's limit.
+	if trade.Price != 4_500_000 {
+		t.Errorf("price = %d, want the resting ask at 4,500,000", trade.Price)
+	}
+	if trade.TakerSide != "buy" {
+		t.Errorf("taker side = %q, want buy", trade.TakerSide)
+	}
+	if trade.ID == 0 {
+		t.Error("trade has no id — a client cannot dedupe it against the REST tape")
+	}
+	if trade.ExecutedAt.IsZero() {
+		t.Error("trade has no execution time")
+	}
+}
+
+// A trade the ledger refused must never appear on the feed: a client cannot
+// tell an announced-but-unsettled trade from a real one, and no REST read would
+// ever confirm it.
+func TestOnlySettledTradesAreAnnounced(t *testing.T) {
+	a := newAPI(t)
+
+	client := a.hub.Subscribe()
+	defer client.Close()
+
+	// An event whose orders do not exist. Settlement will fail on it.
+	poison := models.Trade{
+		Market: "BTC-USD", RestingOrderID: 999_998, IncomingOrderID: 999_999,
+		IncomingSide: "buy", Quantity: 1_000, Price: 4_500_000,
+		ExecutionTime: time.Now().UTC(),
+	}
+	a.services.Trades.SettlementChan <- models.LedgerEvent{Fill: &poison}
+
+	select {
+	case raw := <-client.Events():
+		t.Fatalf("a trade that never settled was announced: %s", raw)
+	case <-time.After(1500 * time.Millisecond):
+	}
+}
+
+func TestTheFeedHonoursItsSubscription(t *testing.T) {
+	a := newAPI(t)
+
+	// Watching a market nothing will trade on.
+	conn, server := a.dial("?markets=ETH-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	seller := a.account("seller@test", 0, 500_000_000)
+	buyer := a.account("buyer@test", 100_000_000, 0)
+	a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+	a.do(http.MethodPost, "/orders", buyer, map[string]any{
+		"market": "BTC-USD", "side": "buy", "quantity": 40_000_000, "price": 4_600_000})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	_, raw, err := conn.Read(ctx)
+	if err == nil {
+		t.Fatalf("a BTC-USD trade reached a client watching ETH-USD: %s", raw)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("read failed for the wrong reason: %v", err)
+	}
+}
+
+// Resubscribing without reconnecting is the reason this is a websocket rather
+// than a one-way stream.
+func TestAClientCanChangeMarketsOnTheSameConnection(t *testing.T) {
+	a := newAPI(t)
+
+	conn, server := a.dial("?markets=ETH-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	subscribe, err := json.Marshal(map[string]any{"type": "subscribe", "markets": []string{"BTC-USD"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(context.Background(), websocket.MessageText, subscribe); err != nil {
+		t.Fatal(err)
+	}
+	// The switch is processed by the read loop; give it a moment to land.
+	time.Sleep(150 * time.Millisecond)
+
+	seller := a.account("seller@test", 0, 500_000_000)
+	buyer := a.account("buyer@test", 100_000_000, 0)
+	a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+	a.do(http.MethodPost, "/orders", buyer, map[string]any{
+		"market": "BTC-USD", "side": "buy", "quantity": 40_000_000, "price": 4_600_000})
+
+	if trade := nextTrade(t, conn); trade.Market != "BTC-USD" {
+		t.Fatalf("market = %q, want the newly subscribed BTC-USD", trade.Market)
+	}
+}
+
+func waitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition never became true")
 }

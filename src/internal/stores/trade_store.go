@@ -31,7 +31,7 @@ var ErrNoBalance = errors.New("settlement: no balance row to debit")
 // update leaves the two permanently disagreeing — and a debited buyer beside an
 // uncredited seller is money destroyed.
 func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models.Trade,
-	baseCurrency, quoteCurrency string, quoteAmount int64) error {
+	baseCurrency, quoteCurrency string, quoteAmount int64) (int64, error) {
 
 	buyOrderID, sellOrderID := trade.RestingOrderID, trade.IncomingOrderID
 	if trade.IncomingSide == "buy" {
@@ -40,7 +40,7 @@ func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models
 
 	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback(ctx) // no-op if already committed
 
@@ -48,7 +48,7 @@ func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models
 	// second trade row, advances filled_quantity again and moves the money
 	// again — so the claim and the effect have to commit together.
 	if err := claimEvent(ctx, tx, eventID); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Lowest id first, so two settlements can never hold what the other needs.
@@ -58,11 +58,11 @@ func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models
 	}
 	first, err := lockOrder(ctx, tx, firstID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	second, err := lockOrder(ctx, tx, secondID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	buy, sell := first, second
@@ -85,21 +85,23 @@ func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models
 		sellRelease = sell.locked
 	}
 
-	_, err = tx.Exec(ctx, `
+	var tradeID int64
+	err = tx.QueryRow(ctx, `
 		INSERT INTO trades
 			(buy_order_id, sell_order_id, taker_order_id, market, quantity, price_each, executed_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id
 	`, buyOrderID, sellOrderID, trade.IncomingOrderID, trade.Market,
-		trade.Quantity, trade.Price, trade.ExecutionTime)
+		trade.Quantity, trade.Price, trade.ExecutionTime).Scan(&tradeID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if err := fillOrder(ctx, tx, buyOrderID, trade.Quantity, buyRelease); err != nil {
-		return err
+		return 0, err
 	}
 	if err := fillOrder(ctx, tx, sellOrderID, trade.Quantity, sellRelease); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Buyer gives up quote and receives base; the seller the reverse. Whatever
@@ -118,11 +120,11 @@ func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models
 	}
 	for _, m := range moves {
 		if err := moveBalance(ctx, tx, m.userID, m.currency, m.available, m.locked); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	return tradeID, tx.Commit(ctx)
 }
 
 // orderLock is the settlement-relevant state of one order, read under a lock.

@@ -12,6 +12,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stream"
 )
 
 func main() {
@@ -30,6 +31,12 @@ func main() {
 
 	stores := stores.NewStores(dbpool)
 	services := services.NewServices(stores, registry, SChan)
+
+	// The live feed. Settlement announces onto it, the stream endpoint reads
+	// from it, and neither can block the other: a client that stops reading is
+	// dropped rather than waited for.
+	hub := stream.NewHub()
+	services.Trades.Stream = hub
 
 	// Recovery, in this order and only this order.
 	//
@@ -52,7 +59,7 @@ func main() {
 		log.Fatalf("could not reconcile the order book with the database: %v\n", err)
 	}
 
-	mux := api.NewRouter(services)
+	mux := api.NewRouter(services, hub)
 
 	var h http.Handler = mux
 	h = api.WithCORS(h) // global
