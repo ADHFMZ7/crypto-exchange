@@ -8,7 +8,13 @@ import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { fillFraction, formatOrderLegs } from "../lib/markets";
+import { FillsPanel } from "../components/FillsPanel";
 import type { Order, OrderStatus } from "../types";
+
+/** Only a resting order can be cancelled; the other two are terminal. */
+function isCancellable(status: OrderStatus): boolean {
+  return status === "open" || status === "partially_filled";
+}
 
 const STATUS_CLASS: Record<OrderStatus, string> = {
   open: "tag",
@@ -31,6 +37,12 @@ export const TradesPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+
+  // Ids with a cancellation in flight. Cancelling answers 202 — the book acts
+  // on it behind the response — so the row has to show something between the
+  // click and the status changing on a later poll, or the button looks dead.
+  const [cancelling, setCancelling] = useState<Set<number>>(new Set());
+  const [cancelError, setCancelError] = useState<string>();
 
   // `silent` distinguishes a background poll from the Refresh button. Without
   // it the button would flicker into its loading state every few seconds and
@@ -57,6 +69,41 @@ export const TradesPage: React.FC = () => {
   );
 
   usePolling(() => loadOrders(true), 4000, Boolean(token));
+
+  const cancelOrder = useCallback(
+    async (orderID: number) => {
+      if (!token) return;
+
+      setCancelling((prev) => new Set(prev).add(orderID));
+      setCancelError(undefined);
+
+      try {
+        await api.cancelOrder(token, orderID);
+        // Read back rather than patching the row locally: the order may have
+        // filled in the meantime, and the server is the only thing that knows.
+        await loadOrders(true);
+      } catch (err) {
+        if (err instanceof ApiError && err.isUnauthorized) {
+          logout();
+          return;
+        }
+        if (err instanceof ApiError && err.status === 409) {
+          // It filled or was already cancelled before this arrived. Not a
+          // failure worth alarming anyone about — just show what is true now.
+          await loadOrders(true);
+          return;
+        }
+        setCancelError(errorMessage(err));
+      } finally {
+        setCancelling((prev) => {
+          const next = new Set(prev);
+          next.delete(orderID);
+          return next;
+        });
+      }
+    },
+    [loadOrders, logout, token]
+  );
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -90,6 +137,7 @@ export const TradesPage: React.FC = () => {
         }
       >
         {error && <div className="pill status-danger">{error}</div>}
+        {cancelError && <div className="pill status-danger">{cancelError}</div>}
 
         {!error && (
           <table className="table" style={{ marginTop: 4 }}>
@@ -103,6 +151,7 @@ export const TradesPage: React.FC = () => {
                 <th style={{ textAlign: "right" }}>Limit price</th>
                 <th>Status</th>
                 <th>Placed</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -153,20 +202,32 @@ export const TradesPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="muted">{new Date(order.created_at).toLocaleString()}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {isCancellable(order.status) && (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => cancelOrder(order.id)}
+                          disabled={cancelling.has(order.id)}
+                        >
+                          {cancelling.has(order.id) ? "Cancelling…" : "Cancel"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
 
               {orders.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={9} className="muted">
                     No orders yet. <Link to="/trades/new">Place one →</Link>
                   </td>
                 </tr>
               )}
               {loading && orders.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={9} className="muted">
                     Loading orders…
                   </td>
                 </tr>
@@ -175,6 +236,8 @@ export const TradesPage: React.FC = () => {
           </table>
         )}
       </SourcedPanel>
+
+      <FillsPanel />
 
       <MarketTable />
 
