@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
+import { OrderBook } from "../components/OrderBook";
+import { TradeTape } from "../components/TradeTape";
 import { useAuth } from "../hooks/useAuth";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
@@ -86,6 +88,12 @@ export const CreateTradePage: React.FC = () => {
 
   const intent = "intent" in built ? built.intent : null;
   const intentError = "error" in built ? built.error : null;
+
+  // The market to show depth and a tape for. Taken from the resolved candidates
+  // rather than from `intent`, which is null whenever the typed amounts are
+  // incomplete — the book should not blink out while someone edits a number.
+  const watchedSymbol =
+    intent?.market.symbol ?? preferredSymbol ?? candidates[0]?.market.symbol;
 
   const spendAvailableMinor = availableOf(spendCurrency);
   const shortfall = intent ? intent.spendMinor - spendAvailableMinor : 0n;
@@ -389,6 +397,17 @@ export const CreateTradePage: React.FC = () => {
           </div>
         </form>
       </SourcedPanel>
+
+      {/*
+       * The book and the tape for whichever market the two currency pickers
+       * resolve to. They sit under the form rather than beside it because the
+       * price to type is the one thing they answer: with no external feed, the
+       * resting book is the only signal for what a limit ought to be.
+       */}
+      <div className="grid grid-2" style={{ gap: 18 }}>
+        <OrderBook symbol={watchedSymbol} />
+        <TradeTape symbol={watchedSymbol} />
+      </div>
 
       <ReferenceStatus />
 

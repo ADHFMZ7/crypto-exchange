@@ -1,4 +1,15 @@
-import type { OrderAck, OrdersResponse, Side, User, Wallet } from "../types";
+import type {
+  CancelAck,
+  MarketTradesResponse,
+  OrderAck,
+  OrderbookSnapshot,
+  OrdersResponse,
+  Side,
+  TickersResponse,
+  TradesResponse,
+  User,
+  Wallet
+} from "../types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
@@ -126,8 +137,7 @@ export const api = {
    * it is the only place the wire format is constructed.
    *
    * All four fields are required. Cancellation is not part of this payload —
-   * it is a separate resource (DELETE /orders/{id}), which the backend does not
-   * serve yet.
+   * it is a separate resource, cancelOrder below.
    */
   createOrder: (
     token: string,
@@ -135,7 +145,55 @@ export const api = {
   ) => request<OrderAck>("/orders", { method: "POST", token, body: payload }),
 
   /** GET /orders — the caller's own orders, newest first. */
-  getOrders: (token: string) => request<OrdersResponse>("/orders", { token })
+  getOrders: (token: string) => request<OrdersResponse>("/orders", { token }),
+
+  /**
+   * DELETE /orders/{id} — stop matching a resting order and release its lock.
+   *
+   * Answers 202, not 200. The book is owned by a worker goroutine and the funds
+   * move behind it, so this means the cancellation is queued, not that it has
+   * happened. Re-read GET /orders for the outcome.
+   *
+   * The order can still fill in that window, in which case it ends up `filled`
+   * and the cancellation simply lost. That is a normal race, not an error to
+   * retry: a second attempt answers 409.
+   */
+  cancelOrder: (token: string, orderID: number) =>
+    request<CancelAck>(`/orders/${orderID}`, { method: "DELETE", token }),
+
+  /**
+   * GET /trades — the caller's own executions, newest first.
+   *
+   * This is the detail behind `filled_quantity` on GET /orders: that says how
+   * much of an order filled, this says which trades did it and at what price.
+   * An order that walked several price levels has one entry per level.
+   */
+  getTrades: (token: string, limit?: number) =>
+    request<TradesResponse>(`/trades${limit ? `?limit=${limit}` : ""}`, { token }),
+
+  /*
+   * The three below are public: no token, because none of them carries anything
+   * belonging to an account. Depth has no owners and the tape has no order ids.
+   */
+
+  /** GET /markets/tickers — every listed market's trailing-window summary. */
+  getTickers: () => request<TickersResponse>("/markets/tickers"),
+
+  /** GET /markets/{symbol}/trades — the public tape, newest first. */
+  getMarketTrades: (symbol: string, limit?: number) =>
+    request<MarketTradesResponse>(
+      `/markets/${encodeURIComponent(symbol)}/trades${limit ? `?limit=${limit}` : ""}`
+    ),
+
+  /**
+   * GET /orderbook/{symbol} — resting depth, best first on both sides.
+   *
+   * `limit` caps price levels per side, not orders.
+   */
+  getOrderbook: (symbol: string, limit?: number) =>
+    request<OrderbookSnapshot>(
+      `/orderbook/${encodeURIComponent(symbol)}${limit ? `?limit=${limit}` : ""}`
+    )
 };
 
 /** Turns any thrown value into something safe to render. */

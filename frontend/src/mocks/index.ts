@@ -9,22 +9,6 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import type { MarketTicker } from "../types";
-
-/**
- * Retired by: GET /markets/{symbol}/ticker (does not exist yet).
- *
- * NOT retired by GET /markets, which is live — that lists which pairs exist but
- * carries no prices. The symbols below are invented alongside the numbers; the
- * real market list comes from lib/reference.
- */
-export const MOCK_MARKETS: MarketTicker[] = [
-  { symbol: "BTC-USD", price: 45210, change: 2.1, volume: 2150 },
-  { symbol: "ETH-USD", price: 3230, change: -0.8, volume: 8891 },
-  { symbol: "SOL-USD", price: 112, change: 1.6, volume: 12540 },
-  { symbol: "DOGE-USD", price: 0.088, change: 5.2, volume: 102001 }
-];
-
 /** Retired by: GET /markets/{symbol}/candles or a trades websocket. */
 export const MOCK_CHART_SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
 
@@ -44,16 +28,6 @@ export function seedSeries(): Record<string, PricePoint[]> {
     "ETH-USD": start(3200),
     "SOL-USD": start(110)
   };
-}
-
-/** Random walk used to fake ticker movement. Pure noise — not a price feed. */
-export function driftMarkets(markets: MarketTicker[]): MarketTicker[] {
-  return markets.map((m) => {
-    const drift = (Math.random() - 0.5) * (m.price * 0.0015);
-    const nextPrice = Math.max(m.price + drift, 0.0001);
-    const nextChange = ((nextPrice - m.price) / m.price) * 100 + m.change;
-    return { ...m, price: Number(nextPrice.toFixed(2)), change: Number(nextChange.toFixed(2)) };
-  });
 }
 
 export function driftSeries(series: Record<string, PricePoint[]>): Record<string, PricePoint[]> {

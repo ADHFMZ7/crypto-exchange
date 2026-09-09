@@ -1,65 +1,111 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { SourcedPanel } from "./DataSource";
-import { MOCK_MARKETS, MOCK_TICK_MS, driftMarkets } from "../mocks";
-import type { MarketTicker } from "../types";
+import { usePolling } from "../hooks/usePolling";
+import { useReference } from "../hooks/useReference";
+import { api, errorMessage } from "../lib/api";
+import { formatPrice, formatQuantity, percentChange } from "../lib/markets";
+import type { Ticker } from "../types";
 
 /**
- * The quote board. Every number here is invented — see mocks/index.ts.
- * Shared by the home and trades pages so the fake data has exactly one source.
+ * The quote board, from GET /markets/tickers.
+ *
+ * Every market the registry lists appears, including ones that have never
+ * traded — a market with no price is a fact about the exchange, and hiding it
+ * would make an empty board look like a failed request.
  */
 export const MarketTable: React.FC = () => {
-  const [markets, setMarkets] = useState<MarketTicker[]>(MOCK_MARKETS);
+  const { reference } = useReference();
 
-  useEffect(() => {
-    const id = setInterval(() => setMarkets(driftMarkets), MOCK_TICK_MS);
-    return () => clearInterval(id);
+  const [tickers, setTickers] = useState<Ticker[]>([]);
+  const [error, setError] = useState<string>();
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.getTickers();
+      setTickers(res.tickers ?? []);
+      setError(undefined);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoaded(true);
+    }
   }, []);
+
+  usePolling(load, 8000);
 
   return (
     <SourcedPanel
       eyebrow="Markets"
       title="Quote board"
-      kind="mock"
-      endpoint="awaiting GET /markets/{symbol}/ticker"
+      kind="live"
+      endpoint="GET /markets/tickers"
       note={
         <>
-          Invented prices on a random walk. <code>GET /markets</code> is live now, but it only says
-          which pairs exist — there is still no price feed, so both the prices and these symbols come
-          from <code>mocks/index.ts</code>. Only the markets listed on the trade page are tradeable.
+          Last traded price and the change over the trailing window, computed from the trades
+          ledger. A market reads <strong>no trades yet</strong> until something actually crosses —
+          there is no external price feed, so these move only when this exchange matches an order.
         </>
       }
-      actions={
-        <button type="button" className="ghost-button" onClick={() => setMarkets(MOCK_MARKETS)}>
-          Reset
-        </button>
-      }
     >
+      {error && <div className="pill status-danger">{error}</div>}
+
       <table className="table">
         <thead>
           <tr>
-            <th>Symbol</th>
-            <th style={{ textAlign: "right" }}>Price</th>
+            <th>Market</th>
+            <th style={{ textAlign: "right" }}>Last</th>
             <th style={{ textAlign: "right" }}>Change</th>
+            <th style={{ textAlign: "right" }}>High</th>
+            <th style={{ textAlign: "right" }}>Low</th>
             <th style={{ textAlign: "right" }}>Volume</th>
+            <th style={{ textAlign: "right" }}>Trades</th>
           </tr>
         </thead>
         <tbody>
-          {markets.map((m) => (
-            <tr key={m.symbol}>
-              <td>{m.symbol}</td>
-              <td style={{ textAlign: "right" }}>{m.price.toLocaleString()}</td>
-              <td
-                style={{
-                  textAlign: "right",
-                  color: m.change >= 0 ? "var(--success)" : "var(--danger)"
-                }}
-              >
-                {m.change >= 0 ? "+" : ""}
-                {m.change}%
+          {tickers.map((t) => {
+            const percent = percentChange(t);
+
+            return (
+              <tr key={t.market}>
+                <td>{t.market}</td>
+
+                {t.has_traded ? (
+                  <>
+                    <td style={{ textAlign: "right" }}>{formatPrice(reference, t.market, t.last_price)}</td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        color: t.change >= 0 ? "var(--success)" : "var(--danger)"
+                      }}
+                    >
+                      {percent === undefined
+                        ? "—"
+                        : `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{formatPrice(reference, t.market, t.high)}</td>
+                    <td style={{ textAlign: "right" }}>{formatPrice(reference, t.market, t.low)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatQuantity(reference, t.market, t.base_volume)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{t.trade_count.toLocaleString()}</td>
+                  </>
+                ) : (
+                  <td className="muted" colSpan={6} style={{ textAlign: "right" }}>
+                    no trades yet
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+
+          {loaded && !tickers.length && (
+            <tr>
+              <td className="muted" colSpan={7}>
+                No markets listed.
               </td>
-              <td style={{ textAlign: "right" }}>{m.volume.toLocaleString()}</td>
             </tr>
-          ))}
+          )}
         </tbody>
       </table>
     </SourcedPanel>
