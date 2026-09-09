@@ -52,10 +52,8 @@ func newAPI(t *testing.T) *api {
 	// The real wiring, workers and all: matching and settlement run behind the
 	// responses exactly as they do in production.
 	all := stores.NewStores(pool)
-	svc := services.NewServices(all, registry, make(chan models.LedgerEvent, 256))
-
 	hub := stream.NewHub()
-	svc.Trades.Stream = hub
+	svc := services.NewServices(all, registry, make(chan models.LedgerEvent, 256), hub)
 
 	return &api{t: t, router: NewRouter(svc, hub), hub: hub, services: svc}
 }
@@ -626,4 +624,124 @@ func waitFor(t *testing.T, condition func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition never became true")
+}
+
+// nextDepth reads until a book snapshot arrives, or the test gives up.
+func nextDepth(t *testing.T, conn *websocket.Conn) models.Orderbook {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for {
+		_, raw, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("reading from the feed: %v", err)
+		}
+
+		var event struct {
+			Type    string           `json:"type"`
+			Payload models.Orderbook `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &event); err != nil {
+			t.Fatalf("feed sent something that is not an event: %s", raw)
+		}
+		if event.Type == "depth" {
+			return event.Payload
+		}
+	}
+}
+
+// Depth is the half executions cannot carry: an order that rests without
+// trading changes the book and produces no trade at all.
+func TestARestingOrderReachesTheDepthFeed(t *testing.T) {
+	a := newAPI(t)
+	seller := a.account("seller@test", 0, 500_000_000)
+
+	conn, server := a.dial("?markets=BTC-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	// Rests: nothing on the other side to cross with.
+	a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+
+	book := nextDepth(t, conn)
+
+	if book.Market != "BTC-USD" {
+		t.Errorf("market = %q", book.Market)
+	}
+	if len(book.Asks) != 1 || book.Asks[0].Price != 4_500_000 || book.Asks[0].Quantity != 100_000_000 {
+		t.Fatalf("asks = %+v, want the resting sell", book.Asks)
+	}
+	if len(book.Bids) != 0 {
+		t.Errorf("bids = %+v, want none", book.Bids)
+	}
+}
+
+// Cancelling removes depth without producing a trade either, so a client
+// watching only executions would keep showing an order that is gone.
+func TestACancellationReachesTheDepthFeed(t *testing.T) {
+	a := newAPI(t)
+	seller := a.account("seller@test", 0, 500_000_000)
+
+	rec := a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+	var ack struct {
+		OrderID int64 `json:"order_id"`
+	}
+	a.decode(rec, &ack)
+
+	conn, server := a.dial("?markets=BTC-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	a.expect(a.do(http.MethodDelete, fmt.Sprintf("/orders/%d", ack.OrderID), seller, nil),
+		http.StatusAccepted, "cancel")
+
+	// The book empties; keep reading until it does or the deadline hits.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if book := nextDepth(t, conn); len(book.Asks) == 0 {
+			return
+		}
+	}
+	t.Fatal("the cancelled order never left the depth feed")
+}
+
+// REST and the feed must describe the same book in the same shape, or a client
+// has to hold two readings of one thing.
+func TestDepthOverRestAndTheFeedAgree(t *testing.T) {
+	a := newAPI(t)
+	seller := a.account("seller@test", 0, 500_000_000)
+	buyer := a.account("buyer@test", 100_000_000, 0)
+
+	conn, server := a.dial("?markets=BTC-USD")
+	defer server.Close()
+	defer conn.CloseNow()
+	waitFor(t, func() bool { return a.hub.Clients() == 1 })
+
+	a.do(http.MethodPost, "/orders", seller, map[string]any{
+		"market": "BTC-USD", "side": "sell", "quantity": 100_000_000, "price": 4_500_000})
+	a.do(http.MethodPost, "/orders", buyer, map[string]any{
+		"market": "BTC-USD", "side": "buy", "quantity": 30_000_000, "price": 4_400_000})
+
+	// Drain until the feed shows both sides, then compare with a REST read.
+	var streamed models.Orderbook
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		streamed = nextDepth(t, conn)
+		if len(streamed.Bids) == 1 && len(streamed.Asks) == 1 {
+			break
+		}
+	}
+
+	var rest models.Orderbook
+	a.decode(a.do(http.MethodGet, "/orderbook/BTC-USD", "", nil), &rest)
+
+	if fmt.Sprintf("%+v", rest) != fmt.Sprintf("%+v", streamed) {
+		t.Fatalf("REST and the feed disagree:\n  rest   %+v\n  stream %+v", rest, streamed)
+	}
 }

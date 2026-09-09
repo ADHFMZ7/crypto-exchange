@@ -11,6 +11,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stream"
 )
 
 // TODO: Put proper errrors
@@ -24,9 +25,14 @@ type OrderService struct {
 	Orderbooks map[string]*orderbook.Orderbook
 	RQueues    map[string]chan Request
 	SChan      chan models.LedgerEvent
+
+	// Where book changes are announced. Optional: nil means nobody is
+	// listening, which is the normal state in tests.
+	Stream *stream.Hub
 }
 
-func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore, registry *market.Registry, SChan chan models.LedgerEvent) *OrderService {
+func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderStore,
+	registry *market.Registry, SChan chan models.LedgerEvent, hub *stream.Hub) *OrderService {
 
 	channels := map[string]chan Request{}
 
@@ -39,6 +45,7 @@ func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderSt
 		Orderbooks: make(map[string]*orderbook.Orderbook),
 		RQueues:    channels,
 		SChan:      SChan,
+		Stream:     hub,
 	}
 
 	// Build every book and queue before starting any worker, and keep these two
@@ -72,7 +79,35 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 		return
 	}
 
-	for request := range channel {
+	// Depth is published on a timer rather than after every order.
+	//
+	// A snapshot costs a walk of every level, and a busy market changes on
+	// every message — so publishing per order would spend more time describing
+	// the book than matching against it. A timer also guarantees the final
+	// state of a burst is published: a plain "only if enough time has passed"
+	// throttle drops the last change and leaves clients looking at a book that
+	// has stopped being true.
+	depth := time.NewTicker(depthInterval)
+	defer depth.Stop()
+
+	dirty := false
+
+	for {
+		var request Request
+
+		select {
+		case incoming, open := <-channel:
+			if !open {
+				// Whatever the last message changed still deserves publishing.
+				service.publishDepth(book, market, &dirty)
+				return
+			}
+			request = incoming
+
+		case <-depth.C:
+			service.publishDepth(book, market, &dirty)
+			continue
+		}
 
 		id := orderbook.OrderID(request.OrderID)
 
@@ -87,6 +122,7 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 
 		if request.Type == Cancel {
 			book.Cancel(id)
+			dirty = true
 			// Published from here, behind any fills this order already
 			// produced, so the ledger releases what is left of the lock and
 			// not what an earlier fill still owed.
@@ -114,6 +150,8 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 			continue
 		}
 
+		dirty = true
+
 		for _, trade := range trades {
 			trade_model := models.Trade{
 				Market:          market,
@@ -130,6 +168,34 @@ func (service *OrderService) StartWorker(channel chan Request, market string) {
 
 	}
 
+}
+
+// How often a changed book is announced, and how deep.
+//
+// Four times a second reads as live without turning the feed into a firehose,
+// and the depth matches what the REST endpoint serves by default so a client
+// switching between the two sees the same book.
+const (
+	depthInterval = 250 * time.Millisecond
+	depthLevels   = 20
+)
+
+// publishDepth announces the book, but only if something has changed it.
+//
+// Called from the worker goroutine, which owns this book — computing depth
+// anywhere else would race an in-flight match.
+func (service *OrderService) publishDepth(book *orderbook.Orderbook, market string, dirty *bool) {
+	if !*dirty || service.Stream == nil {
+		return
+	}
+	*dirty = false
+
+	bids, asks := book.Depth(depthLevels)
+	service.Stream.Publish(stream.Event{
+		Type:    stream.EventDepth,
+		Market:  market,
+		Payload: DepthSnapshot{Market: market, Bids: bids, Asks: asks}.Book(),
+	})
 }
 
 // TODO: Find a place for this later
@@ -248,6 +314,28 @@ type DepthSnapshot struct {
 	Market string
 	Bids   []orderbook.DepthLevel
 	Asks   []orderbook.DepthLevel
+}
+
+// Book renders the snapshot in the shape that crosses the wire, so REST and the
+// live feed cannot drift into describing the same book differently.
+func (s DepthSnapshot) Book() models.Orderbook {
+	return models.Orderbook{
+		Market: s.Market,
+		Bids:   wireLevels(s.Bids),
+		Asks:   wireLevels(s.Asks),
+	}
+}
+
+func wireLevels(levels []orderbook.DepthLevel) []models.DepthLevel {
+	out := make([]models.DepthLevel, 0, len(levels))
+	for _, level := range levels {
+		out = append(out, models.DepthLevel{
+			Price:    int64(level.Price),
+			Quantity: int64(level.Shares),
+			Orders:   level.Orders,
+		})
+	}
+	return out
 }
 
 func requestTypeFor(side string) (RequestType, error) {

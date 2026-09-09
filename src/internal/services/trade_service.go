@@ -31,7 +31,7 @@ type TradeService struct {
 	SettlementChan chan models.LedgerEvent
 }
 
-func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, outboxStore *stores.OutboxStore, registry *market.Registry, SChan chan models.LedgerEvent) *TradeService {
+func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, outboxStore *stores.OutboxStore, registry *market.Registry, SChan chan models.LedgerEvent, hub *stream.Hub) *TradeService {
 
 	service := &TradeService{
 		WalletStore: walletStore,
@@ -41,6 +41,7 @@ func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStor
 
 		MarketRegistry: registry,
 		SettlementChan: SChan,
+		Stream:         hub,
 	}
 
 	go service.SettlementWorker()

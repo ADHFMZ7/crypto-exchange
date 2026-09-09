@@ -29,14 +29,14 @@ func main() {
 	registry, _ := market.NewMarketRegistry(currencies, markets)
 	SChan := make(chan models.LedgerEvent, 1024)
 
-	stores := stores.NewStores(dbpool)
-	services := services.NewServices(stores, registry, SChan)
-
-	// The live feed. Settlement announces onto it, the stream endpoint reads
-	// from it, and neither can block the other: a client that stops reading is
-	// dropped rather than waited for.
+	// The live feed. Settlement announces executions onto it, the matching
+	// workers announce depth, the stream endpoint reads from it, and none of
+	// them can block another: a client that stops reading is dropped rather
+	// than waited for.
 	hub := stream.NewHub()
-	services.Trades.Stream = hub
+
+	stores := stores.NewStores(dbpool)
+	services := services.NewServices(stores, registry, SChan, hub)
 
 	// Recovery, in this order and only this order.
 	//

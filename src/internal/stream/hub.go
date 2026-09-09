@@ -20,10 +20,14 @@ type Event struct {
 	Payload any    `json:"payload,omitempty"`
 }
 
-// Event types. Trades are the only one today; the envelope exists so adding
-// depth or ticker updates does not become a second protocol.
+// Event types.
+//
+// A trade is a fact that happened once; depth is the current state of a book.
+// The client treats them differently — one is appended, the other replaces —
+// which is why the envelope names the type rather than leaving it to shape.
 const (
 	EventTrade = "trade"
+	EventDepth = "depth"
 )
 
 // backlog is how many events a client may fall behind by before it is dropped.

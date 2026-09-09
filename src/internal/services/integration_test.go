@@ -10,6 +10,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stream"
 	"github.com/ADHFMZ7/crypto-exchange/internal/testsupport"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -39,6 +40,7 @@ type harness struct {
 	outbox   *stores.OutboxStore
 	registry *market.Registry
 	events   chan models.LedgerEvent
+	hub      *stream.Hub
 }
 
 // newHarness wires the real services over an empty schema, with no goroutines
@@ -58,8 +60,11 @@ func newHarness(t *testing.T) *harness {
 	all := stores.NewStores(pool)
 	events := make(chan models.LedgerEvent, 64)
 
+	hub := stream.NewHub()
+
 	orders := &OrderService{
 		WalletStore: all.Wallets,
+		Stream:      hub,
 		OrderStore:  all.Orders,
 		Registry:    registry,
 		Orderbooks:  map[string]*orderbook.Orderbook{},
@@ -73,6 +78,7 @@ func newHarness(t *testing.T) *harness {
 
 	trades := &TradeService{
 		WalletStore:    all.Wallets,
+		Stream:         hub,
 		UserStore:      all.Users,
 		TradeStore:     all.Trades,
 		OutboxStore:    all.Outbox,
@@ -82,7 +88,7 @@ func newHarness(t *testing.T) *harness {
 
 	return &harness{
 		pool: pool, orders: orders, trades: trades,
-		wallets: all.Wallets, outbox: all.Outbox, registry: registry, events: events,
+		wallets: all.Wallets, outbox: all.Outbox, registry: registry, events: events, hub: hub,
 	}
 }
 
