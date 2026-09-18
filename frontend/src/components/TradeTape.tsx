@@ -46,13 +46,15 @@ export const TradeTape: React.FC<Props> = ({ symbol }) => {
   return (
     <SourcedPanel
       eyebrow="Tape"
-      title={symbol ? `Recent trades — ${symbol}` : "Recent trades"}
+      title="Recent trades"
       kind="live"
       endpoint="GET /markets/{symbol}/trades"
-      note={
+      fill
+      note={<>Trades that have actually happened here, most recent first.</>}
+      devNote={
         <>
-          Every execution on this market, newest first. Colour is the side that crossed the spread,
-          not the side that profited.
+          Colour is <code>taker_side</code> — the side that crossed the spread, not the side that
+          profited.
         </>
       }
     >

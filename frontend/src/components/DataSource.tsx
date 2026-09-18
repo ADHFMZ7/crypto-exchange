@@ -1,4 +1,5 @@
 import React from "react";
+import { useDeveloperMode } from "../hooks/useDeveloperMode";
 
 /**
  * Every panel in this app declares where its numbers come from, so nobody has to
@@ -52,8 +53,19 @@ type PanelProps = {
   eyebrow?: string;
   kind: SourceKind;
   endpoint?: string;
+  /** Shown to everyone. Say what the panel is for, not how it is fed. */
   note?: React.ReactNode;
+  /**
+   * Shown only in developer mode: what happens underneath, which endpoint
+   * answers, why a number rounds the way it does.
+   */
+  devNote?: React.ReactNode;
   actions?: React.ReactNode;
+  /**
+   * Stretch to the height of the grid cell and scroll the body rather than the
+   * page. For tiled layouts where every panel should end on the same line.
+   */
+  fill?: boolean;
   children: React.ReactNode;
 };
 
@@ -67,21 +79,32 @@ export const SourcedPanel: React.FC<PanelProps> = ({
   kind,
   endpoint,
   note,
+  devNote,
   actions,
+  fill = false,
   children
-}) => (
-  <section className={`panel panel-${kind}`}>
-    <div className="headline">
-      <div>
-        {eyebrow && <div className="tag">{eyebrow}</div>}
-        <h2 className="panel-title">{title}</h2>
+}) => {
+  const { developer } = useDeveloperMode();
+
+  // Provenance colouring says where numbers come from, which is a question
+  // only somebody building this app is asking.
+  const provenance = developer ? ` panel-${kind}` : "";
+
+  return (
+    <section className={`panel${provenance}${fill ? " panel-fill" : ""}`}>
+      <div className="headline">
+        <div>
+          {eyebrow && <div className="tag">{eyebrow}</div>}
+          <h2 className="panel-title">{title}</h2>
+        </div>
+        <div className="inline-actions">
+          {actions}
+          {developer && <SourceBadge kind={kind} endpoint={endpoint} />}
+        </div>
       </div>
-      <div className="inline-actions">
-        {actions}
-        <SourceBadge kind={kind} endpoint={endpoint} />
-      </div>
-    </div>
-    {note && <SourceNote kind={kind}>{note}</SourceNote>}
-    {children}
-  </section>
-);
+      {note && <SourceNote kind={developer ? kind : "live"}>{note}</SourceNote>}
+      {developer && devNote && <SourceNote kind={kind}>{devNote}</SourceNote>}
+      {fill ? <div className="panel-body">{children}</div> : children}
+    </section>
+  );
+};

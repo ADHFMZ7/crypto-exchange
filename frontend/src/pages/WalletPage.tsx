@@ -47,6 +47,27 @@ export const WalletPage: React.FC = () => {
 
   usePolling(() => loadWallet(true), 6000, Boolean(token));
 
+  /*
+   * One row per listed currency, not one per balance the API returned.
+   *
+   * A balance row only exists once a user has held something, so a new account
+   * shows USD and nothing else — which is a poor way to find out that three
+   * other currencies are tradeable. Listing every currency the registry knows,
+   * with a zero where there is no row yet, makes the deposit form below
+   * discoverable instead of something you have to already know about.
+   */
+  const rows = Object.keys(reference.currencies)
+    .sort()
+    .map((currency) => {
+      const balance = balances.find((b) => b.currency === currency);
+      return {
+        currency,
+        available: balance?.available ?? 0,
+        locked: balance?.locked ?? 0,
+        holds: Boolean(balance) && toAmount(balance!.available) + toAmount(balance!.locked) > 0n
+      };
+    });
+
   // Whole units are a display convention that exists in this input and nowhere
   // else. The typed string is parsed directly — Number("0.1") * 100 is
   // 10.000000000000002, and a balance built out of that will not reconcile.
@@ -96,7 +117,13 @@ export const WalletPage: React.FC = () => {
         title="Balances"
         kind="live"
         endpoint="GET /wallets/me"
-        note="Read from the database, and refreshed on a timer — settlement moves funds between locked and available as orders fill."
+        note={
+          <>
+            <strong>Available</strong> is what you can spend now. <strong>Locked</strong> is
+            committed to orders you have open, and comes back when they fill or you cancel them.
+          </>
+        }
+        devNote="Read from Postgres and refreshed on a timer; settlement moves funds between the two columns as orders fill."
         actions={
           <button
             type="button"
@@ -120,27 +147,23 @@ export const WalletPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {balances.map((balance) => (
-                <tr key={balance.id}>
+              {rows.map((row) => (
+                <tr key={row.currency}>
                   <td>
-                    <strong>{balance.currency}</strong>
+                    <strong className={row.holds ? undefined : "muted"}>{row.currency}</strong>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {reference.currencies[row.currency]?.name ?? row.currency}
+                    </div>
                   </td>
-                  <td style={{ textAlign: "right" }}>
-                    {formatBalance(reference, balance.available, balance.currency)}
+                  <td style={{ textAlign: "right" }} className={row.holds ? undefined : "muted"}>
+                    {formatBalance(reference, row.available, row.currency)}
                   </td>
-                  <td style={{ textAlign: "right" }} className={balance.locked ? undefined : "muted"}>
-                    {formatBalance(reference, balance.locked, balance.currency)}
+                  <td style={{ textAlign: "right" }} className={row.locked ? undefined : "muted"}>
+                    {formatBalance(reference, row.locked, row.currency)}
                   </td>
                 </tr>
               ))}
-              {balances.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={3} className="muted">
-                    No balances yet.
-                  </td>
-                </tr>
-              )}
-              {loading && balances.length === 0 && (
+              {loading && !balances.length && (
                 <tr>
                   <td colSpan={3} className="muted">
                     Loading balances…
@@ -167,9 +190,14 @@ export const WalletPage: React.FC = () => {
         endpoint="PATCH /wallets/me"
         note={
           <>
-            Sends a signed delta in the selected currency's <strong>minor units</strong> —
-            withdrawals are the same call with a negative amount. Depositing a currency you have
-            never held creates the balance, which is how you fund the sell side of a market.
+            This is a paper exchange, so funds appear out of nowhere. Add a currency you have never
+            held to fund the sell side of a market.
+          </>
+        }
+        devNote={
+          <>
+            <code>PATCH /wallets/me</code> takes a signed delta in that currency's minor units — a
+            withdrawal is the same call with a negative amount.
           </>
         }
       >

@@ -55,9 +55,14 @@ export const FillsPanel: React.FC = () => {
       endpoint="GET /trades"
       note={
         <>
-          One row per execution, newest first. <strong>Taker</strong> means your order crossed the
-          spread — a taker buy pays at most its limit and often less, and the difference returns to
-          your available balance when the order closes.
+          Every time one of your orders traded, and at what price. A large order can appear here
+          several times, once per price it filled at.
+        </>
+      }
+      devNote={
+        <>
+          <strong>Taker</strong> means your order crossed the spread. A taker buy pays at most its
+          limit and often less; the difference returns to available when the order closes.
         </>
       }
     >

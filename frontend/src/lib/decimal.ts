@@ -49,11 +49,6 @@ export function parseAmountRounded(input: string, exponent: number): RoundedPars
   return { ok: true, value, rounded: /[1-9]/.test(dropped) };
 }
 
-/** Integer division rounding half-up. All inputs must be positive. */
-export function divRoundHalfUp(numerator: bigint, denominator: bigint): bigint {
-  return (2n * numerator + denominator) / (2n * denominator);
-}
-
 /** Integer division rounding away from zero. All inputs must be positive. */
 export function divCeil(numerator: bigint, denominator: bigint): bigint {
   return (numerator + denominator - 1n) / denominator;

@@ -1,506 +1,88 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { SourcedPanel } from "../components/DataSource";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { MarketHeader } from "../components/MarketHeader";
 import { OrderBook } from "../components/OrderBook";
+import { OrderTicket } from "../components/OrderTicket";
 import { TradeTape } from "../components/TradeTape";
 import { useAuth } from "../hooks/useAuth";
+import { usePolling } from "../hooks/usePolling";
 import { useReference } from "../hooks/useReference";
-import { ApiError, api, errorMessage } from "../lib/api";
-import { fromMinorUnits, toAmount } from "../lib/decimal";
-import {
-  buildIntent,
-  counterpartsFor,
-  effectiveExponent,
-  formatAmount,
-  formatBalance,
-  resolveMarkets,
-  toOrderPayload,
-  tradeableCurrencies
-} from "../lib/markets";
-import type { OrderAck, WalletBalance } from "../types";
+import { ApiError, api } from "../lib/api";
+import type { OrderbookSnapshot, WalletBalance } from "../types";
 
+/**
+ * The trade screen.
+ *
+ * One viewport, three tiles of equal width: what you are willing to pay, what
+ * is resting, and what has just traded. They fill the height together and
+ * scroll their own bodies, so the page itself never scrolls and nothing sits
+ * beside dead space.
+ *
+ * The book earns a third of the screen because this exchange has no external
+ * price feed — what is resting is the only evidence of what a limit is worth,
+ * so it belongs next to the field where that number is typed.
+ */
 export const CreateTradePage: React.FC = () => {
   const { token, logout } = useAuth();
   const { reference } = useReference();
 
-  const [spendCurrency, setSpendCurrency] = useState("USD");
-  const [receiveCurrency, setReceiveCurrency] = useState("BTC");
-  const [spendAmount, setSpendAmount] = useState("45000");
-  const [receiveAmount, setReceiveAmount] = useState("1");
-
-  const [preferredSymbol, setPreferredSymbol] = useState<string | undefined>();
+  const [symbol, setSymbol] = useState<string | undefined>(reference.markets[0]?.symbol);
   const [balances, setBalances] = useState<WalletBalance[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>();
-  const [result, setResult] = useState<OrderAck | null>(null);
+  const [book, setBook] = useState<OrderbookSnapshot>();
 
-  const currencies = tradeableCurrencies(reference);
+  const market = useMemo(
+    () => reference.markets.find((m) => m.symbol === symbol),
+    [reference.markets, symbol]
+  );
 
   // Reference data can arrive after first paint and change the market list.
   useEffect(() => {
-    if (currencies.length && !currencies.includes(spendCurrency)) {
-      setSpendCurrency(currencies[0]);
-    }
-  }, [currencies, spendCurrency]);
+    if (!market && reference.markets.length) setSymbol(reference.markets[0].symbol);
+  }, [market, reference.markets]);
 
-  useEffect(() => {
+  const loadWallet = useCallback(async () => {
     if (!token) return;
-    let cancelled = false;
-
-    api
-      .getWallet(token)
-      .then((wallet) => {
-        if (!cancelled) setBalances(wallet.balances ?? []);
-      })
-      .catch((err) => {
-        if (!cancelled && err instanceof ApiError && err.isUnauthorized) logout();
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const wallet = await api.getWallet(token);
+      setBalances(wallet.balances ?? []);
+    } catch (err) {
+      if (err instanceof ApiError && err.isUnauthorized) logout();
+    }
   }, [logout, token]);
 
-  const availableOf = (code: string): bigint => {
-    const balance = balances.find((b) => b.currency === code);
-    return balance ? toAmount(balance.available) : 0n;
-  };
-
-  // A currency pair can back more than one market (spot vs. perp vs. dated).
-  // With a single candidate the user never sees this.
-  const candidates = useMemo(
-    () => resolveMarkets(reference, spendCurrency, receiveCurrency),
-    [receiveCurrency, reference, spendCurrency]
-  );
-
-  const built = useMemo(
-    () =>
-      buildIntent(
-        reference,
-        spendCurrency,
-        spendAmount,
-        receiveCurrency,
-        receiveAmount,
-        preferredSymbol
-      ),
-    [preferredSymbol, receiveAmount, receiveCurrency, reference, spendAmount, spendCurrency]
-  );
-
-  const intent = "intent" in built ? built.intent : null;
-  const intentError = "error" in built ? built.error : null;
-
-  // The market to show depth and a tape for. Taken from the resolved candidates
-  // rather than from `intent`, which is null whenever the typed amounts are
-  // incomplete — the book should not blink out while someone edits a number.
-  const watchedSymbol =
-    intent?.market.symbol ?? preferredSymbol ?? candidates[0]?.market.symbol;
-
-  const spendAvailableMinor = availableOf(spendCurrency);
-  const shortfall = intent ? intent.spendMinor - spendAvailableMinor : 0n;
-  const insufficient = shortfall > 0n;
-
-  const swap = () => {
-    setSpendCurrency(receiveCurrency);
-    setReceiveCurrency(spendCurrency);
-    setSpendAmount(receiveAmount);
-    setReceiveAmount(spendAmount);
-  };
-
-  const setMax = () => {
-    setSpendAmount(fromMinorUnits(spendAvailableMinor, effectiveExponent(reference, spendCurrency)));
-  };
-
-  /**
-   * Settles both fields onto the values actually being sent. Runs on blur rather
-   * than on change so rounding never fights someone mid-keystroke.
-   */
-  const normalizeAmounts = () => {
-    if (!intent) return;
-    setSpendAmount(
-      fromMinorUnits(intent.spendMinor, effectiveExponent(reference, intent.spendCurrency))
-    );
-    setReceiveAmount(
-      fromMinorUnits(intent.receiveMinor, effectiveExponent(reference, intent.receiveCurrency))
-    );
-  };
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token) {
-      setError("You must be logged in.");
-      return;
-    }
-
-    setLoading(true);
-    setError(undefined);
-    setResult(null);
-
-    try {
-      if (!intent) {
-        setError(intentError?.message ?? "Fill in both amounts.");
-        return;
-      }
-
-      // The ack is no longer the only record of the order — GET /orders reads
-      // it back from the database, so there is nothing to save client-side.
-      const ack = await api.createOrder(token, toOrderPayload(intent));
-      setResult(ack);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const precisionHint = (code: string) => {
-    const exponent = effectiveExponent(reference, code);
-    return exponent === 0 ? "whole numbers only" : `up to ${exponent} decimals`;
-  };
+  // Balances move without the user acting: a resting order's funds shift from
+  // available to locked, and settlement moves them again when it fills.
+  usePolling(loadWallet, 6000, Boolean(token));
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <SourcedPanel
-        eyebrow="Trade API"
-        title="Exchange currency"
-        kind="live"
-        endpoint="POST /orders"
-        note={
-          <>
-            Describe the trade as what you give and what you get — the market and side are worked out
-            below. A <strong>202</strong> means the request was queued for the order book, not that it
-            filled.
-          </>
-        }
-      >
-        <form className="stack" style={{ gap: 14 }} onSubmit={onSubmit}>
-              <div className="leg">
-                <div className="leg-label">
-                  <span>You spend</span>
-                  <span className="muted">
-                    Balance: {formatAmount(reference, availableOf(spendCurrency), spendCurrency)}
-                    <button type="button" className="link-button" onClick={setMax}>
-                      Max
-                    </button>
-                  </span>
-                </div>
-                <div className="leg-row">
-                  <input
-                    className="leg-amount"
-                    type="text"
-                    inputMode="decimal"
-                    value={spendAmount}
-                    onChange={(e) => setSpendAmount(e.target.value)}
-                    onBlur={normalizeAmounts}
-                    aria-label={`Amount of ${spendCurrency} to spend`}
-                  />
-                  <select
-                    className="leg-currency"
-                    value={spendCurrency}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setSpendCurrency(next);
-                      if (next === receiveCurrency) {
-                        setReceiveCurrency(counterpartsFor(reference, next)[0] ?? receiveCurrency);
-                      }
-                    }}
-                    aria-label="Currency to spend"
-                  >
-                    {currencies.map((code) => (
-                      <option key={code} value={code}>
-                        {code} — {reference.currencies[code]?.name ?? code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="muted leg-hint">{precisionHint(spendCurrency)}</div>
-              </div>
+    <div className="trade-screen">
+      <MarketHeader symbol={symbol}>
+        {reference.markets.length > 1 && (
+          <select
+            value={symbol ?? ""}
+            onChange={(e) => setSymbol(e.target.value)}
+            aria-label="Market"
+            style={{ width: "auto" }}
+          >
+            {reference.markets.map((m) => (
+              <option key={m.symbol} value={m.symbol}>
+                {m.symbol}
+              </option>
+            ))}
+          </select>
+        )}
+      </MarketHeader>
 
-              <div className="swap-row">
-                <button type="button" className="icon-button" onClick={swap} aria-label="Swap currencies">
-                  ⇅
-                </button>
-              </div>
-
-              <div className="leg">
-                <div className="leg-label">
-                  <span>You receive</span>
-                  <span className="muted">
-                    Balance: {formatAmount(reference, availableOf(receiveCurrency), receiveCurrency)}
-                  </span>
-                </div>
-                <div className="leg-row">
-                  <input
-                    className="leg-amount"
-                    type="text"
-                    inputMode="decimal"
-                    value={receiveAmount}
-                    onChange={(e) => setReceiveAmount(e.target.value)}
-                    onBlur={normalizeAmounts}
-                    aria-label={`Amount of ${receiveCurrency} to receive`}
-                  />
-                  <select
-                    className="leg-currency"
-                    value={receiveCurrency}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setReceiveCurrency(next);
-                      if (next === spendCurrency) {
-                        setSpendCurrency(counterpartsFor(reference, next)[0] ?? spendCurrency);
-                      }
-                    }}
-                    aria-label="Currency to receive"
-                  >
-                    {currencies.map((code) => (
-                      <option key={code} value={code}>
-                        {code} — {reference.currencies[code]?.name ?? code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="muted leg-hint">{precisionHint(receiveCurrency)}</div>
-              </div>
-
-              {intent && (
-                <>
-                  <div className="rate-line">
-                    <span>
-                      Limit rate <strong>1 {intent.market.base}</strong> ={" "}
-                      <strong>{intent.rateDisplay}</strong>
-                    </span>
-                    <span className="muted">
-                      {intent.side === "buy" ? "Spend at most" : "Receive at least"}{" "}
-                      {formatAmount(
-                        reference,
-                        intent.side === "buy" ? intent.spendMinor : intent.receiveMinor,
-                        intent.market.quote
-                      )}
-                    </span>
-                  </div>
-
-                  {intent.adjustment && (
-                    <div className="adjust-note">
-                      {intent.adjustment.fromPrecision
-                        ? `${intent.adjustment.currency} holds ${effectiveExponent(reference, intent.adjustment.currency)} decimals, so that was rounded to `
-                        : "Nudged to "}
-                      <strong>
-                        {formatAmount(
-                          reference,
-                          intent.adjustment.actual,
-                          intent.adjustment.currency
-                        )}
-                      </strong>{" "}
-                      (from{" "}
-                      {formatAmount(reference, intent.adjustment.typed, intent.adjustment.currency)})
-                      so the rate lands on a whole unit.
-                    </div>
-                  )}
-
-                  {candidates.length > 1 ? (
-                    <label className="stack" style={{ gap: 6 }}>
-                      <span className="muted">
-                        {spendCurrency}/{receiveCurrency} trades on more than one market — pick one:
-                      </span>
-                      <select
-                        value={intent.market.symbol}
-                        onChange={(e) => setPreferredSymbol(e.target.value)}
-                      >
-                        {candidates.map(({ market }) => (
-                          <option key={market.symbol} value={market.symbol}>
-                            {market.symbol}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <div className="muted">
-                      Routing via <code>{intent.market.symbol}</code>, chosen automatically from the
-                      currency pair.
-                    </div>
-                  )}
-                </>
-              )}
-
-              {intentError && <div className="pill status-danger">{intentError.message}</div>}
-
-              {insufficient && intent && (
-                <div className="pill status-danger">
-                  Short {formatAmount(reference, shortfall, intent.spendCurrency)} — you have{" "}
-                  {formatAmount(reference, availableOf(intent.spendCurrency), intent.spendCurrency)}.
-                </div>
-              )}
-
-              {intent && (
-                <details className="translation">
-                  <summary>What gets sent to the matching engine</summary>
-                  <table className="table" style={{ marginTop: 8 }}>
-                    <tbody>
-                      <tr>
-                        <td className="muted">Market</td>
-                        <td>
-                          <code>{intent.market.symbol}</code>{" "}
-                          <span className="muted">
-                            base {intent.market.base} / quote {intent.market.quote}
-                          </span>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="muted">Side</td>
-                        <td>
-                          <code>{intent.side === "buy" ? "limit_buy" : "limit_sell"}</code>{" "}
-                          <span className="muted">
-                            you are {intent.side === "buy" ? "acquiring" : "giving up"}{" "}
-                            {intent.market.base}
-                          </span>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="muted">shares</td>
-                        <td>
-                          <code>{intent.quantity.toString()}</code>{" "}
-                          <span className="muted">
-                            {effectiveExponent(reference, intent.market.base) === 0
-                              ? `whole ${intent.market.base}`
-                              : `${intent.market.base} minor units`}
-                          </span>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="muted">price</td>
-                        <td>
-                          <code>{intent.price.toString()}</code>{" "}
-                          <span className="muted">
-                            {effectiveExponent(reference, intent.market.quote) === 0
-                              ? `${intent.market.quote} per ${intent.market.base}`
-                              : `${intent.market.quote} minor units per whole ${intent.market.base}`}
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </details>
-              )}
-          {error && <div className="pill status-danger">{error}</div>}
-
-          <button type="submit" disabled={loading || !intent}>
-            {loading
-              ? "Submitting…"
-              : intent
-                ? `Spend ${formatAmount(reference, intent.spendMinor, intent.spendCurrency)}`
-                : "Submit request"}
-          </button>
-
-          <div className="muted">
-            The balances above go stale the moment an order is accepted — the server locks funds
-            when it writes the order, so reload the wallet to see <code>locked</code> move. A{" "}
-            <strong>202</strong> is not proof that happened: it is returned before the outcome of
-            the lock is known.
-          </div>
-        </form>
-      </SourcedPanel>
-
-      {/*
-       * The book and the tape for whichever market the two currency pickers
-       * resolve to. They sit under the form rather than beside it because the
-       * price to type is the one thing they answer: with no external feed, the
-       * resting book is the only signal for what a limit ought to be.
-       */}
-      <div className="grid grid-2" style={{ gap: 18 }}>
-        <OrderBook symbol={watchedSymbol} />
-        <TradeTape symbol={watchedSymbol} />
+      <div className="trade-tiles">
+        <OrderTicket
+          market={market}
+          balances={balances}
+          bestBid={book?.bids[0]?.price}
+          bestAsk={book?.asks[0]?.price}
+          onPlaced={loadWallet}
+        />
+        <OrderBook symbol={symbol} onSnapshot={setBook} />
+        <TradeTape symbol={symbol} />
       </div>
-
-      <ReferenceStatus />
-
-      {result && (
-        <SourcedPanel
-          eyebrow="Response"
-          title="Accepted by the server"
-          kind="live"
-          endpoint="POST /orders"
-          note={
-            <>
-              The order is now in the database — this id is what{" "}
-              <code>GET /orders</code> reads back.{" "}
-              <Link to="/trades">View all orders →</Link>
-            </>
-          }
-        >
-          <div className="inline-actions" style={{ gap: 12 }}>
-            <div className="card">
-              <div className="muted">Order ID</div>
-              <strong>{result.order_id}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Market</div>
-              <strong>{result.market}</strong>
-            </div>
-            <div className="card">
-              <div className="muted">Status</div>
-              <strong className="status-success">{result.status}</strong>
-            </div>
-          </div>
-          <div className="muted" style={{ marginTop: 12 }}>
-            Received at {new Date(result.receivedAt).toLocaleString()}
-          </div>
-        </SourcedPanel>
-      )}
     </div>
-  );
-};
-
-/** Shows the currency and market table the app is running against. */
-const ReferenceStatus: React.FC = () => {
-  const { reference } = useReference();
-
-  return (
-    <SourcedPanel
-      eyebrow="Reference data"
-      title="Currencies and markets"
-      kind="live"
-      endpoint="GET /currencies, GET /markets"
-      note={
-        <>
-          Served by the backend, so the exponents below are authoritative — the frontend keeps no
-          copy of them. <strong>Every amount sent is integer minor units</strong>, cents and
-          satoshis; dollars and bitcoin exist only in the fields above. The server reads them the
-          same way: <code>quantity</code> in satoshis, <code>price</code> in cents per whole BTC.
-        </>
-      }
-    >
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Market</th>
-            <th>Base</th>
-            <th>Quote</th>
-            <th style={{ textAlign: "right" }}>Precision</th>
-          </tr>
-        </thead>
-        <tbody>
-          {reference.markets.map((market) => (
-            <tr key={market.symbol}>
-              <td>
-                <code>{market.symbol}</code>
-              </td>
-              <td>
-                {market.base}{" "}
-                <span className="muted">
-                  ({effectiveExponent(reference, market.base)}dp)
-                </span>
-              </td>
-              <td>
-                {market.quote}{" "}
-                <span className="muted">
-                  ({effectiveExponent(reference, market.quote)}dp)
-                </span>
-              </td>
-              <td style={{ textAlign: "right" }} className="muted">
-                {effectiveExponent(reference, market.base) === 0 ? "whole units" : "minor units"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </SourcedPanel>
   );
 };

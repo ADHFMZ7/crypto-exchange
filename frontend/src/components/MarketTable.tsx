@@ -42,9 +42,14 @@ export const MarketTable: React.FC = () => {
       endpoint="GET /markets/tickers"
       note={
         <>
-          Last traded price and the change over the trailing window, computed from the trades
-          ledger. A market reads <strong>no trades yet</strong> until something actually crosses —
-          there is no external price feed, so these move only when this exchange matches an order.
+          Prices come from trades on this exchange and nowhere else, so a market only moves when
+          someone actually trades it.
+        </>
+      }
+      devNote={
+        <>
+          Computed from the trades ledger over a trailing window. A market reads{" "}
+          <strong>no trades yet</strong> rather than showing a stale or invented price.
         </>
       }
     >

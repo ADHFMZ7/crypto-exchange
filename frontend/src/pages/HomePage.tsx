@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
 import { MarketTable } from "../components/MarketTable";
@@ -7,14 +7,9 @@ import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { toAmount } from "../lib/decimal";
 import { fillFraction, formatBalance, formatOrderLegs } from "../lib/markets";
-import {
-  MOCK_CHART_SYMBOLS,
-  MOCK_TICK_MS,
-  driftSeries,
-  seedSeries,
-  type PricePoint
-} from "../mocks";
-import type { Order, WalletBalance } from "../types";
+import { usePolling } from "../hooks/usePolling";
+import { formatPrice } from "../lib/markets";
+import type { MarketTrade, Order, WalletBalance } from "../types";
 
 export const HomePage: React.FC = () => {
   const { user, token, logout } = useAuth();
@@ -25,8 +20,10 @@ export const HomePage: React.FC = () => {
   const [walletLoading, setWalletLoading] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [series, setSeries] = useState<Record<string, PricePoint[]>>(seedSeries);
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(MOCK_CHART_SYMBOLS[0]);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(
+    reference.markets[0]?.symbol ?? ""
+  );
+  const [tape, setTape] = useState<MarketTrade[]>([]);
 
 
   useEffect(() => {
@@ -63,12 +60,33 @@ export const HomePage: React.FC = () => {
     };
   }, [logout, token]);
 
-  useEffect(() => {
-    const id = setInterval(() => setSeries(driftSeries), MOCK_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
+  /*
+   * The chart is the trade tape plotted against time, not candles.
+   *
+   * There is no candle endpoint, and inventing one client-side would mean
+   * choosing a bucket size and then presenting the result as if the server had
+   * said it. Executions are what actually happened, so they are what is drawn —
+   * irregularly spaced, because that is what a real book does when nobody
+   * trades for a minute.
+   */
+  const loadTape = useCallback(async () => {
+    if (!selectedSymbol) return;
+    try {
+      const res = await api.getMarketTrades(selectedSymbol, 60);
+      setTape(res.trades ?? []);
+    } catch {
+      // The panel renders its own empty state; a failed poll is not worth a
+      // banner on the landing page.
+    }
+  }, [selectedSymbol]);
 
-  const currentSeries = series[selectedSymbol] ?? [];
+  usePolling(loadTape, 6000, Boolean(selectedSymbol));
+
+  // Oldest first: the tape arrives newest first, and a chart reads left to right.
+  const currentSeries = useMemo(
+    () => tape.map((t) => ({ t: Date.parse(t.executed_at), price: t.price })).reverse(),
+    [tape]
+  );
   const chart = useMemo(() => {
     if (!currentSeries.length) return { min: 0, max: 0, path: "", last: undefined };
 
@@ -101,7 +119,7 @@ export const HomePage: React.FC = () => {
         title={user ? `Hello, ${user.fullname}` : "Welcome"}
         kind="live"
         endpoint="GET /users/me, GET /wallets/me"
-        note="Identity and balances read from the database."
+        devNote="Identity and balances read from Postgres."
         actions={
           <>
             <Link to="/wallet">
@@ -143,14 +161,23 @@ export const HomePage: React.FC = () => {
 
       <SourcedPanel
         eyebrow="Market moves"
-        title={selectedSymbol}
-        kind="mock"
-        endpoint="awaiting GET /markets/{symbol}/candles"
-        note="A synthetic random walk, not price history. Nothing here reflects real or executed trades."
+        title={selectedSymbol || "Markets"}
+        kind="live"
+        endpoint="GET /markets/{symbol}/trades"
+        note={<>Every trade on this market, oldest on the left.</>}
+        devNote={
+          <>
+            Raw executions from <code>GET /markets/{"{symbol}"}/trades</code>, not candles — there
+            is no endpoint for those, and bucketing them here would mean inventing an interval and
+            presenting it as if the server had chosen it.
+          </>
+        }
         actions={
           <div className="pill">
-            <span className="muted">Latest </span>
-            <strong>{chart.last?.price.toLocaleString() ?? "—"} USD</strong>
+            <span className="muted">Last </span>
+            <strong>
+              {chart.last ? formatPrice(reference, selectedSymbol, chart.last.price) : "—"}
+            </strong>
           </div>
         }
       >
@@ -183,9 +210,9 @@ export const HomePage: React.FC = () => {
                 onChange={(e) => setSelectedSymbol(e.target.value)}
                 style={{ width: 140 }}
               >
-                {MOCK_CHART_SYMBOLS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {reference.markets.map((m) => (
+                  <option key={m.symbol} value={m.symbol}>
+                    {m.symbol}
                   </option>
                 ))}
               </select>
@@ -193,8 +220,15 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
         <div className="muted" style={{ marginTop: 8 }}>
-          Range {chart.min.toLocaleString(undefined, { maximumFractionDigits: 2 })} –{" "}
-          {chart.max.toLocaleString(undefined, { maximumFractionDigits: 2 })} USD
+          {currentSeries.length === 0 ? (
+            <>Nothing has traded on {selectedSymbol || "this market"} yet — the chart fills in as orders cross.</>
+          ) : (
+            <>
+              {currentSeries.length} execution{currentSeries.length === 1 ? "" : "s"}, ranging{" "}
+              {formatPrice(reference, selectedSymbol, chart.min)} –{" "}
+              {formatPrice(reference, selectedSymbol, chart.max)}
+            </>
+          )}
         </div>
       </SourcedPanel>
 
@@ -203,7 +237,7 @@ export const HomePage: React.FC = () => {
         title="Recent orders"
         kind="live"
         endpoint="GET /orders"
-        note="Your five most recent orders, read from the database."
+        note="Your five most recent orders."
         actions={
           <Link to="/trades">
             <button type="button" className="ghost-button">
