@@ -288,13 +288,49 @@ func TestEmptyBookHasNoBestPrices(t *testing.T) {
 // Reachable in production: the positive-value check in TradeRouter.CreateTrade
 // is commented out, and the panic happens on the worker goroutine, so it takes
 // the whole process down rather than failing one request.
-func TestNegativeLimitPriceOnEmptyBookPanics(t *testing.T) {
-	t.Skip("known bug: sell-side match loop lacks the BestBuy() != -1 sentinel guard")
-
+// The engine is currency-blind and does not validate prices — that is the
+// service's job, and market.Spends rejects a non-positive one. What the engine
+// must not do is panic on input it was handed, because it runs in a worker
+// goroutine and an unrecovered panic there takes the whole process down.
+//
+// The sell loop used to test only `order.Limit <= ob.BestBuy()`. On an empty
+// book BestBuy() answers the -1 sentinel, so a positive limit fell through
+// harmlessly and a non-positive one entered the loop, missed the level lookup
+// and indexed an empty slice.
+func TestNonPositiveLimitOnAnEmptyBookDoesNotPanic(t *testing.T) {
 	ob := newTestBook()
-	ob.LimitSell(1, 100, -5) // panics: index out of range [0] with length 0
 
+	ob.LimitSell(1, 100, -5)
 	assertBestAsk(t, ob, -5)
+
+	ob.LimitSell(2, 100, 0)
+	assertBestAsk(t, ob, -5) // still the lowest ask
+
+	// The buy side has always had the guard; it must keep it.
+	ob2 := newTestBook()
+	ob2.LimitBuy(1, 100, -5)
+	assertBestBid(t, ob2, -5)
+}
+
+// A sell into a book with only asks, and a buy into a book with only bids: the
+// sentinel is what stops each from being read as a price.
+func TestMatchingAgainstAnEmptySideIsANoOp(t *testing.T) {
+	ob := newTestBook()
+
+	ob.LimitSell(1, 100, 2400)
+	trades := ob.LimitSell(2, 50, 2300) // nothing on the bid side to hit
+	if len(trades) != 0 {
+		t.Fatalf("got %d trades against an empty bid side", len(trades))
+	}
+	assertBestBid(t, ob, -1)
+
+	ob2 := newTestBook()
+	ob2.LimitBuy(1, 100, 2400)
+	trades = ob2.LimitBuy(2, 50, 2500) // nothing on the ask side to lift
+	if len(trades) != 0 {
+		t.Fatalf("got %d trades against an empty ask side", len(trades))
+	}
+	assertBestAsk(t, ob2, -1)
 }
 
 // A full round trip across both branches, to catch state that only corrupts

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
@@ -40,9 +41,24 @@ func NewOrderService(walletStore *stores.WalletStore, orderStore *stores.OrderSt
 		SChan:      SChan,
 	}
 
+	// Build every book and queue before starting any worker, and keep these two
+	// loops separate.
+	//
+	// A worker's first act is to look its own book up in Orderbooks. Starting
+	// them inside the loop that fills the map means goroutine N reads it while
+	// iteration N+1 writes it — a concurrent map read and write, which Go
+	// detects and may simply panic on. With one market the body ran once and
+	// nothing wrote after the read, which is the only reason this was survivable
+	// before there was a second market to list.
+	//
+	// After this constructor returns, the maps are never written again, so the
+	// workers and every request goroutine can read them without a lock.
 	for _, m := range registry.Markets() {
 		service.Orderbooks[m.Symbol] = orderbook.NewOrderbook()
 		channels[m.Symbol] = make(chan Request, 1024)
+	}
+
+	for _, m := range registry.Markets() {
 		go service.StartWorker(channels[m.Symbol], m.Symbol)
 	}
 
@@ -159,14 +175,6 @@ func (service *OrderService) CreateOrder(ctx context.Context, userID int64, payl
 		return 0, err
 	}
 
-	// // Consumed by orderbook worker
-	// req_chan <- Request{
-	// 	Type:    request_type,
-	// 	OrderID: order_id,
-	// 	Price:   payload.Price,
-	// 	Shares:  payload.Quantity,
-	// }
-
 	select {
 	case req_chan <- Request{
 		Type:    request_type,
@@ -177,15 +185,29 @@ func (service *OrderService) CreateOrder(ctx context.Context, userID int64, payl
 		return order_id, nil
 
 	case <-ctx.Done():
-		// Client is gone. Release the lock rather than leaving an order nobody knows about.
-		// TODO: Implement ReleaseOrder in wallet store
-		// if err := service.WalletStore.ReleaseOrder(ctx, order_id); err != nil {
-		// 	log.Printf("orphaned order %d: funds locked, not queued: %v", order_id, err)
-		// }
+		// The order is committed and its funds are locked, but the book never
+		// saw it, so nothing can ever match it. Left alone it holds those funds
+		// until the next restart's flush.
+		//
+		// The release runs on a fresh context on purpose: ctx is the reason we
+		// are here, and handing a cancelled context to the database would fail
+		// the release for exactly the same reason it failed the send.
+		release, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+		defer cancel()
+
+		if err := service.WalletStore.CancelOrder(release, stores.NoEvent, order_id, currency.Code); err != nil {
+			log.Printf("orphaned order %d: %d %s locked and never queued: %v",
+				order_id, amount, currency.Code, err)
+		}
+
 		return 0, ctx.Err()
 	}
 
 }
+
+// How long to spend releasing an order the client abandoned. Short: the caller
+// is already gone, and the startup flush is the backstop if this does not land.
+const releaseTimeout = 5 * time.Second
 
 func (service *OrderService) GetOrdersByID(ctx context.Context, userID int64) (*models.Orders, error) {
 

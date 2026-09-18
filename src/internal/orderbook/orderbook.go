@@ -175,7 +175,7 @@ func (ob *Orderbook) MatchOrder(order *Order) []Trade {
 
 	} else if order.Side == Sell {
 
-		for (order.Shares > 0) && (order.Limit <= ob.BestBuy()) {
+		for ob.BestBuy() != -1 && (order.Shares > 0) && (order.Limit <= ob.BestBuy()) {
 
 			// fmt.Printf("[MatchOrder] Sell order crosses spread: limit=%d >= bestSell=%d\n",
 			// 	order.Limit, ob.BestBuy())
@@ -340,6 +340,13 @@ func (ob *Orderbook) Cancel(orderId OrderID) {
 	order.Cancelled = true
 }
 
+// BestSell is the lowest resting ask, or -1 when there are none.
+//
+// -1 is a sentinel rather than an error, so every caller must test for it
+// before using the result as a price. Both match loops do: without that test a
+// book with nothing on one side answers -1, the level lookup misses, and
+// indexing the empty level slice panics — which in a worker goroutine takes the
+// process with it.
 func (ob *Orderbook) BestSell() Price {
 	// Returns the min sell price
 	price, ok := ob.LowestSell.Peek()
