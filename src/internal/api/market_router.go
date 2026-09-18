@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 )
 
@@ -100,30 +99,7 @@ func (router *MarketRouter) GetOrderbook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"market": snapshot.Market,
-		"bids":   depthDTO(snapshot.Bids),
-		"asks":   depthDTO(snapshot.Asks),
-	})
-}
-
-// depthLevel is the wire shape of one rung. The orderbook's own type has no
-// JSON tags on purpose — it is an engine type, and the wire format is this
-// package's business.
-type depthLevel struct {
-	Price    int64 `json:"price"`    // quote minor units per whole base
-	Quantity int64 `json:"quantity"` // base minor units resting at that price
-	Orders   int   `json:"orders"`
-}
-
-func depthDTO(levels []orderbook.DepthLevel) []depthLevel {
-	out := make([]depthLevel, 0, len(levels))
-	for _, level := range levels {
-		out = append(out, depthLevel{
-			Price:    int64(level.Price),
-			Quantity: int64(level.Shares),
-			Orders:   level.Orders,
-		})
-	}
-	return out
+	// The same shape the live feed sends, so a client replaces its state from
+	// either without keeping two readings of the same book.
+	writeJSON(w, http.StatusOK, snapshot.Book())
 }

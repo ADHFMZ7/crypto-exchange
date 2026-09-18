@@ -11,6 +11,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stream"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -22,10 +23,15 @@ type TradeService struct {
 
 	MarketRegistry *market.Registry
 
+	// Where settled trades are announced. Optional: nil simply means nobody is
+	// listening, which is the normal state in tests and for a process with no
+	// stream endpoint mounted.
+	Stream *stream.Hub
+
 	SettlementChan chan models.LedgerEvent
 }
 
-func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, outboxStore *stores.OutboxStore, registry *market.Registry, SChan chan models.LedgerEvent) *TradeService {
+func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStore, tradeStore *stores.TradeStore, outboxStore *stores.OutboxStore, registry *market.Registry, SChan chan models.LedgerEvent, hub *stream.Hub) *TradeService {
 
 	service := &TradeService{
 		WalletStore: walletStore,
@@ -35,6 +41,7 @@ func NewTradeService(userStore *stores.UserStore, walletStore *stores.WalletStor
 
 		MarketRegistry: registry,
 		SettlementChan: SChan,
+		Stream:         hub,
 	}
 
 	go service.SettlementWorker()
@@ -219,11 +226,43 @@ func (service *TradeService) settleFill(ctx context.Context, eventID int64, trad
 		return fmt.Errorf("notional: %w", err)
 	}
 
-	if err := service.TradeStore.Settle(ctx, eventID, trade, m.Base.Code, m.Quote.Code, quoteAmount); err != nil {
+	tradeID, err := service.TradeStore.Settle(ctx, eventID, trade, m.Base.Code, m.Quote.Code, quoteAmount)
+	if err != nil {
 		return fmt.Errorf("settle: %w", err)
 	}
 
+	// Announced only now, after the ledger has committed it.
+	//
+	// Broadcasting when the book matches would put trades on the tape that
+	// settlement went on to drop, and a client cannot tell the difference — it
+	// would be showing executions that never happened and that no REST read
+	// would ever confirm.
+	service.announce(tradeID, trade)
+
 	return nil
+}
+
+// announce puts a settled trade on the public stream.
+//
+// The taker is the incoming order by definition — it is the one that crossed —
+// so the side it came in on is the side that crossed the spread.
+func (service *TradeService) announce(tradeID int64, trade models.Trade) {
+	if service.Stream == nil {
+		return
+	}
+
+	service.Stream.Publish(stream.Event{
+		Type:   stream.EventTrade,
+		Market: trade.Market,
+		Payload: models.MarketTrade{
+			ID:         tradeID,
+			Market:     trade.Market,
+			Quantity:   trade.Quantity,
+			Price:      trade.Price,
+			TakerSide:  trade.IncomingSide,
+			ExecutedAt: trade.ExecutionTime,
+		},
+	})
 }
 
 // releaseCancelled returns what is left of a cancelled order's lock.

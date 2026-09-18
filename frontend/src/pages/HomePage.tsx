@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { SourcedPanel } from "../components/DataSource";
+import { StreamBadge } from "../components/StreamBadge";
 import { MarketTable } from "../components/MarketTable";
 import { useAuth } from "../hooks/useAuth";
 import { useReference } from "../hooks/useReference";
 import { ApiError, api, errorMessage } from "../lib/api";
 import { toAmount } from "../lib/decimal";
 import { fillFraction, formatBalance, formatOrderLegs } from "../lib/markets";
+import { useMarketStream } from "../hooks/useMarketStream";
 import { usePolling } from "../hooks/usePolling";
 import { formatPrice } from "../lib/markets";
 import type { MarketTrade, Order, WalletBalance } from "../types";
@@ -80,7 +82,15 @@ export const HomePage: React.FC = () => {
     }
   }, [selectedSymbol]);
 
-  usePolling(loadTape, 6000, Boolean(selectedSymbol));
+  // The chart is the same executions the tape shows, so it takes the same feed.
+  // The snapshot is REST; everything after arrives pushed.
+  const streamStatus = useMarketStream(selectedSymbol, {
+    onTrade: (trade) =>
+      setTape((prev) => (prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev].slice(0, 60))),
+    onResync: loadTape
+  });
+
+  usePolling(loadTape, 8000, Boolean(selectedSymbol) && streamStatus !== "live");
 
   // Oldest first: the tape arrives newest first, and a chart reads left to right.
   const currentSeries = useMemo(
@@ -173,12 +183,15 @@ export const HomePage: React.FC = () => {
           </>
         }
         actions={
-          <div className="pill">
-            <span className="muted">Last </span>
-            <strong>
-              {chart.last ? formatPrice(reference, selectedSymbol, chart.last.price) : "—"}
-            </strong>
-          </div>
+          <>
+            <StreamBadge status={streamStatus} />
+            <div className="pill">
+              <span className="muted">Last </span>
+              <strong>
+                {chart.last ? formatPrice(reference, selectedSymbol, chart.last.price) : "—"}
+              </strong>
+            </div>
+          </>
         }
       >
         <div style={{ width: "100%", height: 260, position: "relative" }}>

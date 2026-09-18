@@ -207,3 +207,25 @@ type Ticker struct {
 	WindowHours int        `json:"window_hours"`
 	LastTradeAt *time.Time `json:"last_trade_at"`
 }
+
+// DepthLevel is the live resting volume at one price.
+type DepthLevel struct {
+	Price    int64 `json:"price"`    // quote minor units per whole base
+	Quantity int64 `json:"quantity"` // base minor units resting there
+	Orders   int   `json:"orders"`
+}
+
+// Orderbook is one market's resting depth, best first on both sides.
+//
+// The same shape whether it arrives from GET /orderbook/{symbol} or on the live
+// feed, so a client replaces its state either way rather than keeping two
+// readings of the same thing.
+//
+// It is a snapshot, not a diff. The book here is small enough that sending the
+// whole thing is cheaper than a sequence-numbered delta protocol and the
+// reconciliation bugs that come with one.
+type Orderbook struct {
+	Market string       `json:"market"`
+	Bids   []DepthLevel `json:"bids"`
+	Asks   []DepthLevel `json:"asks"`
+}
