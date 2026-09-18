@@ -323,8 +323,9 @@ export function formatOrderLegs(
 /**
  * What fraction of an order has filled, 0..1.
  *
- * Reads 0 for everything until the matching engine reports fills — which is
- * accurate rather than a placeholder, since nothing can fill yet.
+ * Settlement advances `filled_quantity` in the same transaction that records
+ * the trade, so this tracks real executions rather than an estimate. It moves
+ * asynchronously — an order can fill seconds after the 202 that accepted it.
  */
 export function fillFraction(order: { quantity: number; filled_quantity: number }): number {
   if (!order.quantity) return 0;

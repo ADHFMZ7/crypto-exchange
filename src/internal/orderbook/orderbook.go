@@ -38,6 +38,17 @@ type Order struct {
 	Cancelled bool
 }
 
+// Trade is a single matched fill. Each order can have several
+type Trade struct {
+	RestingOrderID  OrderID
+	IncomingOrderID OrderID
+	IncomingSide    Side
+	Quantity        Shares
+	Price           Price
+
+	ExecutionTime time.Time
+}
+
 type Orderbook struct {
 	// We store levels in a slice and maintain a map to the index
 	LevelsSell   []*Level
@@ -70,10 +81,12 @@ func NewOrderbook() *Orderbook {
 	return &ob
 }
 
-func (ob *Orderbook) MatchOrder(order *Order) *Order {
+func (ob *Orderbook) MatchOrder(order *Order) []Trade {
 
 	// fmt.Printf("\n[MatchOrder] Incoming order ID=%d Side=%v Shares=%d Limit=%d\n",
 	// 	order.ID, order.Side, order.Shares, order.Limit)
+
+	var trades []Trade
 
 	if order.Side == Buy {
 
@@ -123,6 +136,16 @@ func (ob *Orderbook) MatchOrder(order *Order) *Order {
 				sell_order.Shares -= trade_qty
 				sell_order.EventTime = trade_time
 				level.TotalVolume -= trade_qty
+
+				// Aggressor is the buy
+				trades = append(trades, Trade{
+					RestingOrderID:  sell_order.ID,
+					IncomingOrderID: order.ID,
+					IncomingSide:    Buy,
+					Quantity:        trade_qty,
+					Price:           sell_order.Limit,
+					ExecutionTime:   trade_time,
+				})
 
 				// fmt.Printf("[MatchOrder] Post-trade buyerShares=%d sellerShares=%d\n",
 				// 	order.Shares, sell_order.Shares)
@@ -196,6 +219,16 @@ func (ob *Orderbook) MatchOrder(order *Order) *Order {
 				buy_order.EventTime = trade_time
 				level.TotalVolume -= trade_qty
 
+				// Aggressor is the sell
+				trades = append(trades, Trade{
+					RestingOrderID:  buy_order.ID,
+					IncomingOrderID: order.ID,
+					IncomingSide:    Sell,
+					Quantity:        trade_qty,
+					Price:           buy_order.Limit,
+					ExecutionTime:   trade_time,
+				})
+
 				// fmt.Printf("[MatchOrder] Post-trade sellerShares=%d buyerShares=%d\n",
 				// 	order.Shares, buy_order.Shares)
 
@@ -228,10 +261,10 @@ func (ob *Orderbook) MatchOrder(order *Order) *Order {
 
 	// fmt.Println("[MatchOrder] Matching finished")
 
-	return order
+	return trades
 }
 
-func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) {
+func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) []Trade {
 
 	// fmt.Printf("\n[LimitSell] New SELL order ID=%d Shares=%d Limit=%d\n",
 	// orderId, shares, limit)
@@ -250,7 +283,7 @@ func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) {
 
 	// fmt.Println("[LimitSell] Attempting to match order")
 
-	ob.MatchOrder(&order)
+	trades := ob.MatchOrder(&order)
 
 	// fmt.Printf("[LimitSell] Remaining shares after matching=%d\n", order.Shares)
 
@@ -258,9 +291,11 @@ func (ob *Orderbook) LimitSell(orderId OrderID, shares Shares, limit Price) {
 		// fmt.Println("[LimitSell] Adding remaining shares to book")
 		ob.AddOrder(&order)
 	}
+
+	return trades
 }
 
-func (ob *Orderbook) LimitBuy(orderId OrderID, shares Shares, limit Price) {
+func (ob *Orderbook) LimitBuy(orderId OrderID, shares Shares, limit Price) []Trade {
 
 	// fmt.Printf("\n[LimitBuy] New BUY order ID=%d Shares=%d Limit=%d\n",
 	// 	orderId, shares, limit)
@@ -279,7 +314,7 @@ func (ob *Orderbook) LimitBuy(orderId OrderID, shares Shares, limit Price) {
 
 	// fmt.Println("[LimitBuy] Attempting to match order")
 
-	ob.MatchOrder(&order)
+	trades := ob.MatchOrder(&order)
 
 	// fmt.Printf("[LimitBuy] Remaining shares after matching=%d\n", order.Shares)
 
@@ -287,6 +322,8 @@ func (ob *Orderbook) LimitBuy(orderId OrderID, shares Shares, limit Price) {
 		// fmt.Println("[LimitBuy] Adding remaining shares to book")
 		ob.AddOrder(&order)
 	}
+
+	return trades
 }
 
 func (ob *Orderbook) Cancel(orderId OrderID) {

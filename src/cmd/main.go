@@ -8,6 +8,7 @@ import (
 	"github.com/ADHFMZ7/crypto-exchange/internal/api"
 	"github.com/ADHFMZ7/crypto-exchange/internal/db"
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
+	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
 	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
@@ -24,9 +25,10 @@ func main() {
 
 	currencies, markets := market.Default()
 	registry, _ := market.NewMarketRegistry(currencies, markets)
+	SChan := make(chan models.Trade, 1024)
 
 	stores := stores.NewStores(dbpool)
-	services := services.NewServices(stores, registry)
+	services := services.NewServices(stores, registry, SChan)
 	mux := api.NewRouter(services)
 
 	var h http.Handler = mux

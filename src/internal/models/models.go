@@ -90,3 +90,16 @@ type Order struct {
 	Status    string    `json:"status"`     // see the Order* constants above
 	CreatedAt time.Time `json:"created_at"` // marshals to RFC3339
 }
+
+// Trade is a single matched fill. Each order can have several
+type Trade struct {
+	// ID              int64 `json:"id"`
+	Market          string `json:"market"`
+	RestingOrderID  int64  `json:"resting_id"`
+	IncomingOrderID int64  `json:"incoming_id"`
+	IncomingSide    string `json:"incoming_side"`
+	Quantity        int64  `json:"quantity"`
+	Price           int64  `json:"price"`
+
+	ExecutionTime time.Time `json:"execution_time"`
+}

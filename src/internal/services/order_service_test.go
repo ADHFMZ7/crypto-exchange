@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
+	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/ADHFMZ7/crypto-exchange/internal/orderbook"
 )
 
@@ -205,20 +206,41 @@ func TestCreateOrderRejectsMarketWithNoQueue(t *testing.T) {
 	}
 }
 
-// newWorkerService returns a service holding one book for symbol, and that book,
-// so a test can drive the worker and then inspect what it did.
-func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook) {
+// newWorkerService returns a service holding one book for symbol, that book, and
+// the channel the worker publishes fills to, so a test can drive the worker and
+// then inspect both what it did and what it reported.
+//
+// The channel must be buffered past anything the test enqueues. StartWorker
+// publishes each fill before it takes the next request, so with nothing draining
+// the other end a full channel blocks the worker — and the test — forever.
+func newWorkerService(symbol string) (*OrderService, *orderbook.Orderbook, chan models.Trade) {
 	book := orderbook.NewOrderbook()
+	settlements := make(chan models.Trade, 16)
 	return &OrderService{
 		Orderbooks: map[string]*orderbook.Orderbook{symbol: book},
-	}, book
+		SChan:      settlements,
+	}, book, settlements
+}
+
+// drainSettlements closes the channel and collects everything on it. Safe only
+// once StartWorker has returned, which means it has no more fills to publish.
+func drainSettlements(settlements chan models.Trade) []models.Trade {
+	close(settlements)
+
+	var fills []models.Trade
+	for fill := range settlements {
+		fills = append(fills, fill)
+	}
+	return fills
 }
 
 func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
-	service, book := newWorkerService("BTC-USD")
+	service, book, settlements := newWorkerService("BTC-USD")
 
 	// Buffered and closed up front, so StartWorker drains and returns rather
-	// than blocking — no goroutine, no sleep, fully deterministic.
+	// than blocking — no goroutine, no sleep, fully deterministic. The
+	// settlement channel is buffered for the same reason: the worker publishes
+	// the fill this crossing produces before it can return.
 	queue := make(chan Request, 4)
 	queue <- Request{Type: LimitSell, OrderID: 1, Shares: 100, Price: 2400}
 	queue <- Request{Type: LimitBuy, OrderID: 2, Shares: 40, Price: 2500}
@@ -242,10 +264,41 @@ func TestStartWorkerAppliesRequestsToTheBook(t *testing.T) {
 	if resting.Shares != 60 {
 		t.Fatalf("resting shares = %d, want 60", resting.Shares)
 	}
+
+	// The crossing has to reach settlement, or the book has moved and the
+	// ledger will never hear about it.
+	fills := drainSettlements(settlements)
+	if len(fills) != 1 {
+		t.Fatalf("published %d fills, want 1", len(fills))
+	}
+
+	fill := fills[0]
+	if fill.Market != "BTC-USD" {
+		t.Errorf("fill market = %q, want BTC-USD", fill.Market)
+	}
+	if fill.IncomingSide != "buy" {
+		t.Errorf("fill incoming side = %q, want buy: the buy crossed", fill.IncomingSide)
+	}
+	if fill.RestingOrderID != 1 || fill.IncomingOrderID != 2 {
+		t.Errorf("fill orders = resting %d, incoming %d, want 1 and 2",
+			fill.RestingOrderID, fill.IncomingOrderID)
+	}
+	if fill.Quantity != 40 {
+		t.Errorf("fill quantity = %d, want 40", fill.Quantity)
+	}
+	// The resting sell's price, not the buyer's 2500 limit. Settlement refunds
+	// the difference, so reporting the taker's limit here would silently
+	// overcharge the buyer.
+	if fill.Price != 2400 {
+		t.Errorf("fill price = %d, want 2400", fill.Price)
+	}
+	if fill.ExecutionTime.IsZero() {
+		t.Error("fill execution time is zero: it is what orders the tape")
+	}
 }
 
 func TestStartWorkerHandlesCancel(t *testing.T) {
-	service, book := newWorkerService("BTC-USD")
+	service, book, _ := newWorkerService("BTC-USD")
 
 	queue := make(chan Request, 4)
 	queue <- Request{Type: LimitBuy, OrderID: 1, Shares: 100, Price: 2500}
@@ -278,6 +331,7 @@ func TestMarketsDoNotShareABook(t *testing.T) {
 			"BTC-USD": btcBook,
 			"ETH-USD": ethBook,
 		},
+		SChan: make(chan models.Trade, 16),
 	}
 
 	btcQueue := make(chan Request, 2)
@@ -332,7 +386,7 @@ func TestStartWorkerReturnsWhenMarketHasNoBook(t *testing.T) {
 func TestStartWorkerReturnsWhenChannelCloses(t *testing.T) {
 	// The book must exist, or this passes for the wrong reason — the worker
 	// would return on the missing-book guard without ever reaching the range.
-	service, _ := newWorkerService("BTC-USD")
+	service, _, _ := newWorkerService("BTC-USD")
 
 	queue := make(chan Request)
 	close(queue)
