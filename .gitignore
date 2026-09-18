@@ -36,3 +36,7 @@ go.work.sum
 .DS_Store
 docs/api-todos.md
 docs/design/markets-and-currencies.md
+
+# Mockup working files for the design canvas. The seeded canvas is ~2.5 MB of
+# editor payload and is published as an Artifact rather than served from here.
+design/
