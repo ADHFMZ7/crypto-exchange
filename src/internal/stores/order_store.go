@@ -98,3 +98,44 @@ func (store *OrderStore) GetByIDForUser(ctx context.Context, orderID, userID int
 
 	return &order, nil
 }
+
+// RestingOrders returns every order the book would still be matching, oldest
+// first.
+//
+// Oldest first because the caller is reconstructing or unwinding book state,
+// and both want the order things entered in. It is the commit order rather than
+// the order the matching worker saw them in — close, but not the same thing,
+// which is why nothing here claims to restore price-time priority.
+func (store *OrderStore) RestingOrders(ctx context.Context) ([]models.Order, error) {
+	rows, err := store.pool.Query(ctx, `
+		SELECT id, market, side, quantity, filled_quantity, price_each, status, created_at
+		FROM orders
+		WHERE status IN ($1, $2)
+		ORDER BY created_at ASC, id ASC
+	`, models.OrderOpen, models.OrderPartiallyFilled)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make([]models.Order, 0)
+
+	for rows.Next() {
+		var order models.Order
+		if err := rows.Scan(
+			&order.ID,
+			&order.Market,
+			&order.Side,
+			&order.Quantity,
+			&order.FilledQuantity,
+			&order.PriceEach,
+			&order.Status,
+			&order.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		orders = append(orders, order)
+	}
+
+	return orders, rows.Err()
+}

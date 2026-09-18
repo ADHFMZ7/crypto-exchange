@@ -30,7 +30,7 @@ var ErrNoBalance = errors.New("settlement: no balance row to debit")
 // ledger (see migration 000003), so a trade row written without its order
 // update leaves the two permanently disagreeing — and a debited buyer beside an
 // uncredited seller is money destroyed.
-func (store *TradeStore) Settle(ctx context.Context, trade models.Trade,
+func (store *TradeStore) Settle(ctx context.Context, eventID int64, trade models.Trade,
 	baseCurrency, quoteCurrency string, quoteAmount int64) error {
 
 	buyOrderID, sellOrderID := trade.RestingOrderID, trade.IncomingOrderID
@@ -43,6 +43,13 @@ func (store *TradeStore) Settle(ctx context.Context, trade models.Trade,
 		return err
 	}
 	defer tx.Rollback(ctx) // no-op if already committed
+
+	// Before anything moves. A fill is not idempotent — replaying one inserts a
+	// second trade row, advances filled_quantity again and moves the money
+	// again — so the claim and the effect have to commit together.
+	if err := claimEvent(ctx, tx, eventID); err != nil {
+		return err
+	}
 
 	// Lowest id first, so two settlements can never hold what the other needs.
 	firstID, secondID := buyOrderID, sellOrderID

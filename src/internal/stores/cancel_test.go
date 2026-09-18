@@ -16,14 +16,13 @@ two got there first.
 */
 
 func TestCancelOrderReturnsTheUnspentLock(t *testing.T) {
-	store := &WalletStore{testPool}
-	newTestStore(t) // clears the tables
+	_, store, _, _ := newTestStores(t)
 
 	user := seedUser(t, "trader@test")
 	seedBalance(t, user, "USD", 1_000, fiftyDollars)
 	order := seedOrder(t, user, "buy", oneBTC, fiftyDollars, fiftyDollars)
 
-	if err := store.CancelOrder(context.Background(), order, "USD"); err != nil {
+	if err := store.CancelOrder(context.Background(), NoEvent, order, "USD"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,8 +38,7 @@ func TestCancelOrderReturnsTheUnspentLock(t *testing.T) {
 
 // Only the part not already spent on fills comes back.
 func TestCancelOrderReturnsOnlyWhatIsLeftAfterPartialFills(t *testing.T) {
-	store := &WalletStore{testPool}
-	newTestStore(t)
+	_, store, _, _ := newTestStores(t)
 
 	user := seedUser(t, "trader@test")
 	seedBalance(t, user, "USD", 0, 2_000)
@@ -55,7 +53,7 @@ func TestCancelOrderReturnsOnlyWhatIsLeftAfterPartialFills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.CancelOrder(context.Background(), order, "USD"); err != nil {
+	if err := store.CancelOrder(context.Background(), NoEvent, order, "USD"); err != nil {
 		t.Fatal(err)
 	}
 	if available, locked := readBalance(t, user, "USD"); available != 2_000 || locked != 0 {
@@ -66,17 +64,16 @@ func TestCancelOrderReturnsOnlyWhatIsLeftAfterPartialFills(t *testing.T) {
 // A lock released twice would drive a live order's locked_remaining negative and
 // strand every later fill, so the second attempt has to be refused.
 func TestCancelOrderIsRefusedOnceTheOrderIsTerminal(t *testing.T) {
-	store := &WalletStore{testPool}
-	newTestStore(t)
+	_, store, _, _ := newTestStores(t)
 
 	user := seedUser(t, "trader@test")
 	seedBalance(t, user, "USD", 0, fiftyDollars)
 	order := seedOrder(t, user, "buy", oneBTC, fiftyDollars, fiftyDollars)
 
-	if err := store.CancelOrder(context.Background(), order, "USD"); err != nil {
+	if err := store.CancelOrder(context.Background(), NoEvent, order, "USD"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CancelOrder(context.Background(), order, "USD"); !errors.Is(err, ErrNotCancellable) {
+	if err := store.CancelOrder(context.Background(), NoEvent, order, "USD"); !errors.Is(err, ErrNotCancellable) {
 		t.Fatalf("second cancel err = %v, want ErrNotCancellable", err)
 	}
 
@@ -88,8 +85,7 @@ func TestCancelOrderIsRefusedOnceTheOrderIsTerminal(t *testing.T) {
 // The fill that beat the cancellation wins: a filled order stays filled and
 // nothing is returned, because nothing is left.
 func TestCancelOrderLosesToAFillThatSettledFirst(t *testing.T) {
-	store := &WalletStore{testPool}
-	newTestStore(t)
+	_, store, _, _ := newTestStores(t)
 
 	user := seedUser(t, "trader@test")
 	seedBalance(t, user, "USD", 0, 0)
@@ -104,7 +100,7 @@ func TestCancelOrderLosesToAFillThatSettledFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.CancelOrder(context.Background(), order, "USD"); !errors.Is(err, ErrNotCancellable) {
+	if err := store.CancelOrder(context.Background(), NoEvent, order, "USD"); !errors.Is(err, ErrNotCancellable) {
 		t.Fatalf("cancel err = %v, want ErrNotCancellable", err)
 	}
 	if _, status, _ := readOrder(t, order); status != "filled" {

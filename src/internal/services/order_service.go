@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
@@ -323,4 +325,57 @@ func (service *OrderService) Depth(ctx context.Context, symbol string, levels in
 	case <-ctx.Done():
 		return DepthSnapshot{}, ctx.Err()
 	}
+}
+
+// CancelRestingOrders unwinds every order left resting by a previous run.
+//
+// The book is in memory and Postgres is not, so a restart leaves rows that
+// nothing can ever match, holding funds against orders that no longer exist
+// anywhere. Until the book is rebuilt from the ledger instead, cancelling them
+// is what makes the two agree: it cannot be wrong, it needs no ordering
+// guarantees, and it costs one transaction.
+//
+// It must run before the server accepts anything. An order placed against a
+// market that is halfway through its flush would rest beside orders about to be
+// cancelled, which is the inconsistency this exists to remove.
+func (service *OrderService) CancelRestingOrders(ctx context.Context) error {
+
+	resting, err := service.OrderStore.RestingOrders(ctx)
+	if err != nil {
+		return fmt.Errorf("reading resting orders: %w", err)
+	}
+	if len(resting) == 0 {
+		return nil
+	}
+
+	releases := make([]stores.OrderRelease, 0, len(resting))
+	for _, order := range resting {
+		m, ok := service.Registry.BySymbol(order.Market)
+		if !ok {
+			// A market the registry no longer lists. Its lock cannot be
+			// returned without knowing which currency it is in, and guessing
+			// would move the wrong money.
+			return fmt.Errorf("order %d rests on unknown market %q", order.ID, order.Market)
+		}
+
+		currency, err := m.Locks(order.Side)
+		if err != nil {
+			return fmt.Errorf("order %d: %w", order.ID, err)
+		}
+
+		releases = append(releases, stores.OrderRelease{OrderID: order.ID, Currency: currency.Code})
+	}
+
+	freed, err := service.WalletStore.CancelRestingOrders(ctx, releases)
+	if err != nil {
+		return err
+	}
+
+	for currency, amount := range freed {
+		log.Printf("startup: released %d %s minor units held by orders from a previous run",
+			amount, currency)
+	}
+	log.Printf("startup: cancelled %d resting order(s) the in-memory book no longer holds", len(resting))
+
+	return nil
 }

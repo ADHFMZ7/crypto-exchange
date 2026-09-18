@@ -18,7 +18,7 @@ func NewServices(stores *stores.Stores, registry *market.Registry, SChan chan mo
 	return &Services{
 		Users:   NewUserService(stores.Users),
 		Wallets: NewWalletService(stores.Wallets, stores.Users, registry),
-		Trades:  NewTradeService(stores.Users, stores.Wallets, stores.Trades, registry, SChan),
+		Trades:  NewTradeService(stores.Users, stores.Wallets, stores.Trades, stores.Outbox, registry, SChan),
 		Orders:  NewOrderService(stores.Wallets, stores.Orders, registry, SChan),
 	}
 }
