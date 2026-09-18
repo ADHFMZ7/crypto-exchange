@@ -221,8 +221,11 @@ func minimalServices(t *testing.T) *services.Services {
 		t.Fatal(err)
 	}
 
+	// Struct literals rather than the constructors: NewOrderService and
+	// NewTradeService start goroutines that would outlive the test.
 	return &services.Services{
 		Orders: &services.OrderService{Registry: registry},
+		Trades: &services.TradeService{MarketRegistry: registry},
 	}
 }
 
@@ -241,6 +244,8 @@ func TestRouterRouteTable(t *testing.T) {
 		{http.MethodPatch, "/wallets/me", http.StatusUnauthorized},
 		{http.MethodPost, "/orders", http.StatusUnauthorized},
 		{http.MethodGet, "/orders", http.StatusUnauthorized},
+		{http.MethodDelete, "/orders/1", http.StatusUnauthorized},
+		{http.MethodGet, "/trades", http.StatusUnauthorized},
 
 		// Preflight routes answer without authentication.
 		{http.MethodOptions, "/orders/", http.StatusOK},
@@ -252,13 +257,21 @@ func TestRouterRouteTable(t *testing.T) {
 		{http.MethodGet, "/currencies", http.StatusOK},
 		{http.MethodGet, "/markets", http.StatusOK},
 
+		// Public market data. An unknown symbol is refused by the registry
+		// before anything reaches a store, which is what makes these
+		// answerable without a database.
+		{http.MethodGet, "/markets/NOPE-USD/ticker", http.StatusNotFound},
+		{http.MethodGet, "/markets/NOPE-USD/trades", http.StatusNotFound},
+		{http.MethodGet, "/orderbook/NOPE-USD", http.StatusNotFound},
+
 		// Public, and rejected here only because the body is empty.
 		{http.MethodPost, "/auth/login", http.StatusBadRequest},
 		{http.MethodPost, "/users", http.StatusBadRequest},
 
-		// Not routed. /trades is retired — the order router replaces it.
+		// Not routed. /trades is read-only — orders are placed on /orders,
+		// so the path resolves but the method does not.
 		{http.MethodGet, "/does-not-exist", http.StatusNotFound},
-		{http.MethodPost, "/trades", http.StatusNotFound},
+		{http.MethodPost, "/trades", http.StatusMethodNotAllowed},
 		{http.MethodDelete, "/users/me", http.StatusMethodNotAllowed},
 	}
 

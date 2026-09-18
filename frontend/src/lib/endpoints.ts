@@ -74,24 +74,38 @@ export const ENDPOINTS: EndpointStatus[] = [
   {
     method: "DELETE",
     path: "/orders/{id}",
-    state: "mock",
-    purpose: "Cancel a resting order",
-    workaround: "No cancel UI — the trade form only places orders"
+    state: "live",
+    purpose: "Cancel a resting order and return its unspent lock"
   },
   {
     method: "GET",
     path: "/trades",
-    state: "mock",
-    purpose: "Executions against this user's orders, with counterparty price and time",
-    workaround:
-      "Orders page shows aggregate fill progress from filled_quantity — the individual executions behind it are recorded but not served"
+    state: "live",
+    purpose: "Executions against this user's orders, with price, time and maker/taker role"
+  },
+  {
+    method: "GET",
+    path: "/markets/tickers",
+    state: "live",
+    purpose: "Quote board — last, open, change, high, low and volume for every market"
   },
   {
     method: "GET",
     path: "/markets/{symbol}/ticker",
-    state: "mock",
-    purpose: "Quote board — last price, 24h change, volume",
-    workaround: "Ticker tables render a hardcoded list with a random walk"
+    state: "live",
+    purpose: "One market's trailing-window summary"
+  },
+  {
+    method: "GET",
+    path: "/markets/{symbol}/trades",
+    state: "live",
+    purpose: "Public tape — recent executions, with the side that crossed"
+  },
+  {
+    method: "GET",
+    path: "/orderbook/{symbol}",
+    state: "live",
+    purpose: "Resting bids and asks from the in-memory book"
   },
   {
     method: "GET",
@@ -99,13 +113,6 @@ export const ENDPOINTS: EndpointStatus[] = [
     state: "mock",
     purpose: "Price history for the home page chart",
     workaround: "Chart draws a synthetic random walk"
-  },
-  {
-    method: "GET",
-    path: "/orderbook/{symbol}",
-    state: "mock",
-    purpose: "Live bids and asks from the in-memory book",
-    workaround: "Not surfaced anywhere in the UI yet"
   }
 ];
 

@@ -72,9 +72,112 @@ export type OrdersResponse = {
   orders: Order[];
 };
 
-export type MarketTicker = {
-  symbol: string;
+/**
+ * One execution behind an order's fill progress, as GET /trades reports it.
+ *
+ * `id` is the trade id and is NOT unique in this list: a user who was on both
+ * sides of the same trade — nothing prevents self-trading — gets one entry per
+ * side. Key rows on `id` and `side` together.
+ *
+ * `side` is the caller's own side, and `taker` says whether their order was the
+ * one that crossed. A taker on a buy paid at most their limit and often less;
+ * the difference came back to their available balance when the order closed.
+ */
+export type Fill = {
+  id: number;
+  market: string;
+  /** The caller's order, not the counterparty's. */
+  order_id: number;
+  side: Side;
+  /** Base minor units. */
+  quantity: number;
+  /** Quote minor units per one WHOLE base unit. */
   price: number;
+  taker: boolean;
+  executed_at: string;
+};
+
+export type TradesResponse = {
+  trades: Fill[];
+};
+
+/**
+ * One execution on the public tape. No order ids and no owners — this is what
+ * GET /markets/{symbol}/trades can serve without authentication.
+ *
+ * `taker_side` is the direction the aggressor went: a "buy" lifted an offer, a
+ * "sell" hit a bid. It is the only thing on the tape that says who was
+ * impatient.
+ */
+export type MarketTrade = {
+  id: number;
+  market: string;
+  quantity: number;
+  price: number;
+  taker_side: Side;
+  executed_at: string;
+};
+
+export type MarketTradesResponse = {
+  trades: MarketTrade[];
+};
+
+/**
+ * A market's trailing-window summary, from GET /markets/{symbol}/ticker.
+ *
+ * Every price is quote minor units per one WHOLE base unit; `base_volume` is
+ * base minor units. `change` is absolute rather than a percentage, and
+ * `open_price` sits beside it so the client forms the ratio at display time —
+ * the server does not pick a precision on the frontend's behalf.
+ *
+ * `has_traded` distinguishes a market with no history from one that traded at
+ * zero. The latter cannot happen today, but reading `last_price === 0` as "no
+ * trades" would be inventing a rule the wire does not state.
+ */
+export type Ticker = {
+  market: string;
+  has_traded: boolean;
+  last_price: number;
+  open_price: number;
   change: number;
-  volume: number;
+  high: number;
+  low: number;
+  base_volume: number;
+  trade_count: number;
+  window_hours: number;
+  last_trade_at: string | null;
+};
+
+export type TickersResponse = {
+  tickers: Ticker[];
+};
+
+/** One price rung of the resting book. */
+export type DepthLevel = {
+  /** Quote minor units per one WHOLE base unit. */
+  price: number;
+  /** Base minor units resting at this price. */
+  quantity: number;
+  /** How many orders make up that quantity. */
+  orders: number;
+};
+
+/**
+ * GET /orderbook/{symbol}. Both sides are best-first: bids descending, asks
+ * ascending, so `bids[0]` and `asks[0]` are the touch.
+ *
+ * This is a snapshot of an in-memory book, correct at the instant the matching
+ * worker read it and stale as soon as the next order arrives. Treat it as a
+ * picture, never as state to reconcile against.
+ */
+export type OrderbookSnapshot = {
+  market: string;
+  bids: DepthLevel[];
+  asks: DepthLevel[];
+};
+
+/** The 202 body returned by DELETE /orders/{id}. */
+export type CancelAck = {
+  status: string;
+  order_id: number;
 };

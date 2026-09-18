@@ -331,3 +331,41 @@ export function fillFraction(order: { quantity: number; filled_quantity: number 
   if (!order.quantity) return 0;
   return Math.min(Math.max(order.filled_quantity / order.quantity, 0), 1);
 }
+
+/**
+ * Formats a price for a market — quote minor units per one WHOLE base unit, so
+ * the QUOTE exponent applies.
+ *
+ * Pairing a price with the base exponent is the silent failure this exists to
+ * prevent: both readings produce a plausible integer, and the only symptom is a
+ * number wrong by a factor of 10^(base - quote).
+ */
+export function formatPrice(ref: ReferenceData, symbol: string, priceMinor: number): string {
+  const market = ref.markets.find((m) => m.symbol === symbol);
+  if (!market || !Number.isInteger(priceMinor)) return String(priceMinor);
+  return formatAmount(ref, BigInt(priceMinor), market.quote);
+}
+
+/** Formats a quantity for a market — base minor units, so the BASE exponent applies. */
+export function formatQuantity(ref: ReferenceData, symbol: string, quantityMinor: number): string {
+  const market = ref.markets.find((m) => m.symbol === symbol);
+  if (!market || !Number.isInteger(quantityMinor)) return String(quantityMinor);
+  return formatAmount(ref, BigInt(quantityMinor), market.base);
+}
+
+/**
+ * The ticker's change as a percentage of its opening price.
+ *
+ * The server sends the change in absolute minor units and the open beside it,
+ * deliberately: a percentage is a ratio of two integers, and forming it here
+ * keeps the rounding at the point of display instead of baking a precision into
+ * the wire format.
+ *
+ * Undefined when there is no open to divide by — a market whose first trade is
+ * inside the window has no prior price, and "infinite gain" is not a number to
+ * render.
+ */
+export function percentChange(ticker: { change: number; open_price: number }): number | undefined {
+  if (!ticker.open_price) return undefined;
+  return (ticker.change / ticker.open_price) * 100;
+}

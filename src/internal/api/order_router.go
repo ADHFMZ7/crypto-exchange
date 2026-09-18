@@ -2,12 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/auth"
 	"github.com/ADHFMZ7/crypto-exchange/internal/market"
 	"github.com/ADHFMZ7/crypto-exchange/internal/services"
+	"github.com/ADHFMZ7/crypto-exchange/internal/stores"
 )
 
 type OrderRouter struct {
@@ -32,6 +35,60 @@ func (router *OrderRouter) Register(mux *http.ServeMux) {
 		"GET /orders",
 		Authenticate(http.HandlerFunc(router.GetOrders)),
 	)
+	mux.Handle(
+		"DELETE /orders/{id}",
+		Authenticate(http.HandlerFunc(router.CancelOrder)),
+	)
+}
+
+// CancelOrder asks the book to stop matching one of the caller's orders.
+//
+// 202, not 200: the book is owned by a worker goroutine and the funds are
+// released by the settlement worker behind it, so a successful response means
+// the request is queued and ordered behind any fills already in flight — not
+// that the order is cancelled yet. Poll GET /orders for the outcome, exactly as
+// with placement.
+//
+// The order can still fill in that window. That is not an error the client can
+// avoid by retrying, and the status will simply read `filled`.
+func (router *OrderRouter) CancelOrder(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	orderID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || orderID <= 0 {
+		writeError(w, http.StatusBadRequest, "order id must be a positive integer")
+		return
+	}
+
+	err = router.Services.Orders.CancelOrder(ctx, userID, orderID)
+
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status":   "cancelling",
+			"order_id": orderID,
+		})
+
+	case errors.Is(err, stores.ErrOrderNotFound):
+		// Also covers another user's order: see stores.ErrOrderNotFound.
+		writeError(w, http.StatusNotFound, "order not found")
+
+	case errors.Is(err, services.ErrOrderNotCancellable):
+		writeError(w, http.StatusConflict, "order is no longer open")
+
+	case errors.Is(err, services.ErrUnknownMarket):
+		writeError(w, http.StatusNotFound, "unknown market")
+
+	default:
+		writeError(w, http.StatusInternalServerError, "could not cancel order")
+	}
 }
 
 func (router *OrderRouter) GetOrders(w http.ResponseWriter, r *http.Request) {

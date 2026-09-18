@@ -103,3 +103,94 @@ type Trade struct {
 
 	ExecutionTime time.Time `json:"execution_time"`
 }
+
+// OrderCancel is an order the book has stopped matching, whose unspent lock the
+// ledger still has to return.
+type OrderCancel struct {
+	Market  string `json:"market"`
+	OrderID int64  `json:"order_id"`
+	Side    string `json:"side"`
+}
+
+// LedgerEvent is one thing the book has done that the ledger must record.
+// Exactly one field is set.
+//
+// Fills and cancellations share a channel because their relative order matters.
+// A cancellation that overtook a fill of the same order would release a lock the
+// fill still needs, and the fill would then fail against
+// orders_locked_remaining_non_negative — the book would have traded and the
+// ledger would not agree. One queue, applied in the order the book produced
+// them, makes that unrepresentable.
+type LedgerEvent struct {
+	Fill   *Trade
+	Cancel *OrderCancel
+}
+
+// Fill is one execution, seen from the side of it that a particular user owned.
+//
+// A user who was on both sides of a trade — nothing forbids it — gets one Fill
+// per side, because they are two different positions that happen to share a
+// trade id.
+type Fill struct {
+	ID      int64  `json:"id"` // the trade id; not unique across sides
+	Market  string `json:"market"`
+	OrderID int64  `json:"order_id"` // the caller's order, not the counterparty's
+
+	Side     string `json:"side"`     // the caller's side: buy or sell
+	Quantity int64  `json:"quantity"` // base minor units
+	Price    int64  `json:"price"`    // quote minor units per whole base
+	Taker    bool   `json:"taker"`    // whether the caller's order crossed the spread
+
+	ExecutedAt time.Time `json:"executed_at"`
+}
+
+// Fills wraps the list so pagination can be added without breaking the shape,
+// matching Orders.
+type Fills struct {
+	Trades []Fill `json:"trades"`
+}
+
+// MarketTrade is one execution as the public tape sees it: no order ids, and no
+// side attributable to a person. TakerSide says which way the aggressor went,
+// which is what a tape is read for.
+type MarketTrade struct {
+	ID         int64     `json:"id"`
+	Market     string    `json:"market"`
+	Quantity   int64     `json:"quantity"`
+	Price      int64     `json:"price"`
+	TakerSide  string    `json:"taker_side"`
+	ExecutedAt time.Time `json:"executed_at"`
+}
+
+type MarketTrades struct {
+	Trades []MarketTrade `json:"trades"`
+}
+
+// Ticker summarises one market over a trailing window.
+//
+// Prices are quote minor units per one WHOLE base unit, and BaseVolume is base
+// minor units — the same units as everywhere else. Change is absolute rather
+// than a percentage: a percentage is a ratio of two integers that only rounds
+// well at display time, and OpenPrice is included so the client can form it
+// without the server picking a precision.
+//
+// LastPrice is zero when the market has never traded, which HasTraded
+// distinguishes from a market that genuinely traded at zero — impossible today,
+// since trades_amounts_positive forbids it, but the flag costs nothing and
+// stops a client inventing a rule.
+type Ticker struct {
+	Market string `json:"market"`
+
+	HasTraded bool  `json:"has_traded"`
+	LastPrice int64 `json:"last_price"`
+	OpenPrice int64 `json:"open_price"`
+	Change    int64 `json:"change"`
+	High      int64 `json:"high"`
+	Low       int64 `json:"low"`
+
+	BaseVolume int64 `json:"base_volume"`
+	TradeCount int64 `json:"trade_count"`
+
+	WindowHours int        `json:"window_hours"`
+	LastTradeAt *time.Time `json:"last_trade_at"`
+}

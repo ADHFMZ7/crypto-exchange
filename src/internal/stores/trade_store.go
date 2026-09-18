@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ADHFMZ7/crypto-exchange/internal/models"
 	"github.com/jackc/pgx/v5"
@@ -198,4 +199,165 @@ func moveBalance(ctx context.Context, tx pgx.Tx, userID int64, currency string, 
 		    updated_at = now()
 	`, userID, currency, available, locked)
 	return err
+}
+
+// FillsByUserID returns every execution the user was party to, newest first.
+//
+// The two halves are unioned rather than joined into one row because a user can
+// be on both sides of the same trade — self-trading is not prevented — and that
+// is two positions, not one. Collapsing them would silently drop half of a
+// self-trade from the user's own record.
+func (store *TradeStore) FillsByUserID(ctx context.Context, userID int64, limit int) (*models.Fills, error) {
+	rows, err := store.pool.Query(ctx, `
+		SELECT t.id, t.market, t.buy_order_id, 'buy',
+		       t.quantity, t.price_each,
+		       t.taker_order_id = t.buy_order_id,
+		       t.executed_at
+		FROM trades t
+		JOIN orders o ON o.id = t.buy_order_id
+		WHERE o.user_id = $1
+
+		UNION ALL
+
+		SELECT t.id, t.market, t.sell_order_id, 'sell',
+		       t.quantity, t.price_each,
+		       t.taker_order_id = t.sell_order_id,
+		       t.executed_at
+		FROM trades t
+		JOIN orders o ON o.id = t.sell_order_id
+		WHERE o.user_id = $1
+
+		ORDER BY executed_at DESC, id DESC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Non-nil so an account with no fills encodes as [] rather than null.
+	fills := models.Fills{Trades: make([]models.Fill, 0)}
+
+	for rows.Next() {
+		var fill models.Fill
+		if err := rows.Scan(
+			&fill.ID, &fill.Market, &fill.OrderID, &fill.Side,
+			&fill.Quantity, &fill.Price, &fill.Taker, &fill.ExecutedAt,
+		); err != nil {
+			return nil, err
+		}
+		fills.Trades = append(fills.Trades, fill)
+	}
+
+	return &fills, rows.Err()
+}
+
+// RecentByMarket returns the public tape for one market, newest first.
+//
+// No join to orders: nothing here is attributable to a person, and keeping the
+// query off that table is what makes it safe to serve without auth.
+func (store *TradeStore) RecentByMarket(ctx context.Context, market string, limit int) (*models.MarketTrades, error) {
+	rows, err := store.pool.Query(ctx, `
+		SELECT id, market, quantity, price_each,
+		       CASE WHEN taker_order_id = buy_order_id THEN 'buy' ELSE 'sell' END,
+		       executed_at
+		FROM trades
+		WHERE market = $1
+		ORDER BY executed_at DESC, id DESC
+		LIMIT $2
+	`, market, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	trades := models.MarketTrades{Trades: make([]models.MarketTrade, 0)}
+
+	for rows.Next() {
+		var trade models.MarketTrade
+		if err := rows.Scan(
+			&trade.ID, &trade.Market, &trade.Quantity, &trade.Price,
+			&trade.TakerSide, &trade.ExecutedAt,
+		); err != nil {
+			return nil, err
+		}
+		trades.Trades = append(trades.Trades, trade)
+	}
+
+	return &trades, rows.Err()
+}
+
+// TickerByMarket summarises one market over the trailing windowHours.
+//
+// OpenPrice falls back to the first trade inside the window when the market has
+// no history before it. Otherwise a market younger than the window would report
+// its whole life as a change from zero, which reads as an infinite gain.
+//
+// Every aggregate is nullable — a market that has never traded has no last, no
+// high and no low — so they are scanned into pointers and flattened here rather
+// than COALESCEd to zero in SQL, which would make "no trades" indistinguishable
+// from "traded at zero".
+func (store *TradeStore) TickerByMarket(ctx context.Context, market string, windowHours int) (*models.Ticker, error) {
+	ticker := models.Ticker{Market: market, WindowHours: windowHours}
+
+	var last, before, first, high, low *int64
+	var executedAt *time.Time
+
+	err := store.pool.QueryRow(ctx, `
+		WITH windowed AS (
+			SELECT price_each, quantity, executed_at, id
+			FROM trades
+			WHERE market = $1
+			  AND executed_at > now() - make_interval(hours => $2)
+		)
+		SELECT
+			(SELECT price_each FROM trades
+			  WHERE market = $1
+			  ORDER BY executed_at DESC, id DESC LIMIT 1),
+			(SELECT price_each FROM trades
+			  WHERE market = $1
+			    AND executed_at <= now() - make_interval(hours => $2)
+			  ORDER BY executed_at DESC, id DESC LIMIT 1),
+			(SELECT price_each FROM windowed ORDER BY executed_at ASC, id ASC LIMIT 1),
+			(SELECT max(price_each) FROM windowed),
+			(SELECT min(price_each) FROM windowed),
+			(SELECT coalesce(sum(quantity), 0) FROM windowed),
+			(SELECT count(*) FROM windowed),
+			(SELECT max(executed_at) FROM trades WHERE market = $1)
+	`, market, windowHours).Scan(
+		&last, &before, &first, &high, &low,
+		&ticker.BaseVolume, &ticker.TradeCount, &executedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if last == nil {
+		return &ticker, nil
+	}
+
+	ticker.HasTraded = true
+	ticker.LastPrice = *last
+	ticker.LastTradeAt = executedAt
+
+	switch {
+	case before != nil:
+		ticker.OpenPrice = *before
+	case first != nil:
+		ticker.OpenPrice = *first
+	default:
+		// Traded, but not inside the window and not before it — impossible, since
+		// every trade is one or the other. Treat the last price as flat.
+		ticker.OpenPrice = *last
+	}
+	ticker.Change = ticker.LastPrice - ticker.OpenPrice
+
+	if high != nil {
+		ticker.High = *high
+	}
+	if low != nil {
+		ticker.Low = *low
+	}
+
+	return &ticker, nil
 }

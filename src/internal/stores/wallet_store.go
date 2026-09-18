@@ -166,3 +166,69 @@ func (store *WalletStore) PlaceOrder(ctx context.Context,
 
 	return orderID, tx.Commit(ctx)
 }
+
+// ErrNotCancellable is returned when an order reached a terminal status before
+// the cancellation got to it.
+var ErrNotCancellable = errors.New("order is no longer open")
+
+// CancelOrder marks a resting order cancelled and returns its unspent lock.
+//
+// This is the mirror of PlaceOrder: that one moves available into locked and
+// opens the order, this one moves whatever is left back and closes it.
+//
+// The status test lives inside the statement rather than in a read beforehand,
+// so a fill settling concurrently is resolved by Postgres rather than by
+// ordering luck. Whichever transaction commits second finds the row already
+// terminal and changes nothing: a filled order stays filled, and a lock can
+// never be released twice. That matters more than it looks — locked_remaining
+// is what settlement decrements, so a double release would drive a live order's
+// lock negative and strand every later fill against the CHECK.
+//
+// The CTE exists because RETURNING reports post-update values, and the amount
+// to give back is the value from before. `held` captures it under FOR UPDATE;
+// the UPDATE then zeroes the column and hands that captured figure back.
+func (store *WalletStore) CancelOrder(ctx context.Context, orderID int64, lockedCurrency string) error {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op if already committed
+
+	var userID, released int64
+
+	err = tx.QueryRow(ctx, `
+		WITH held AS (
+			SELECT id, user_id, locked_remaining
+			FROM orders
+			WHERE id = $1
+			  AND status IN ($3, $4)
+			FOR UPDATE
+		), cancelled AS (
+			UPDATE orders
+			SET status           = $2,
+			    locked_remaining = 0
+			FROM held
+			WHERE orders.id = held.id
+			RETURNING held.user_id, held.locked_remaining
+		)
+		SELECT user_id, locked_remaining FROM cancelled
+	`, orderID, models.OrderCancelled, models.OrderOpen, models.OrderPartiallyFilled).
+		Scan(&userID, &released)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotCancellable
+	}
+	if err != nil {
+		return err
+	}
+
+	// A fully filled lock leaves nothing to return, and moveBalance would
+	// rather not be asked to move zero.
+	if released > 0 {
+		if err := moveBalance(ctx, tx, userID, lockedCurrency, released, -released); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}

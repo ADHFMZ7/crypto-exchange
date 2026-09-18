@@ -25,7 +25,7 @@ func main() {
 
 	currencies, markets := market.Default()
 	registry, _ := market.NewMarketRegistry(currencies, markets)
-	SChan := make(chan models.Trade, 1024)
+	SChan := make(chan models.LedgerEvent, 1024)
 
 	stores := stores.NewStores(dbpool)
 	services := services.NewServices(stores, registry, SChan)
